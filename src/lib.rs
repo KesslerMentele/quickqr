@@ -1,2 +1,3 @@
-pub mod qr_code;
+mod qr_code;
 
+pub use qr_code::prelude::*;

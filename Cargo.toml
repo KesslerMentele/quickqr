@@ -12,3 +12,6 @@ encoding_rs = { version = "0.8.44", features = ["fast-kanji-encode"], optional =
 [features]
 serde = ["dep:serde"]
 kanji = ["dep:encoding_rs"]
+
+[dev-dependencies]
+serde_json = "1.0.154"

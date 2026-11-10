@@ -3,7 +3,10 @@
 //! correction, masking) that the rest of the module handles.
 
 pub use super::{
-    create_qr_code, EncodedData, EncodingMode,
-    ErrorCorrectionLevel,
-    QrCreationError, QrVersion, QrVersionError, QrData
+    EncodingMode, ErrorCorrectionLevel, MaskSetting,
+    QrCode, QrCreationError, QrData, QrStats, QrVersion, SegmentStats, VersionError,
+    // Error and mode types the public ones above refer to.
+    encoder::EncodeError,
+    segmenter::{SegmentError, SegmentMode},
+    structure::MaskError,
 };

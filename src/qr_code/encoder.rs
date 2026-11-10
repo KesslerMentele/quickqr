@@ -37,8 +37,10 @@ pub enum EncodeError {
     EciOutOfRange(u32),
     /// A structured-append sequence number or total-symbol count outside 0..=15.
     StructuredAppendOutOfRange,
+    /// The requested encoding mode has not been implemented.
     NotImplemented
 }
+impl std::error::Error for EncodeError {}
 impl fmt::Display for EncodeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -211,7 +213,6 @@ fn write_segment_header(bits: &mut BitVec<u8, Lsb0>, mode: SegmentMode, text: &s
         SegmentMode::Numeric => 0b0001,
         SegmentMode::Alphanumeric => 0b0010,
         SegmentMode::Byte => 0b0100,
-        #[cfg(feature = "kanji")]
         SegmentMode::Kanji => 0b1000,
     };
     let count = match mode {

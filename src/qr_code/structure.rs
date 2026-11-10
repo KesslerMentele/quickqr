@@ -70,6 +70,7 @@ pub enum MaskError {
     /// `pattern` is outside the valid 0-7 range of mask patterns.
     InvalidMaskVersion(u8),
 }
+impl std::error::Error for MaskError {}
 impl fmt::Display for MaskError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self { MaskError::InvalidMaskVersion(version) => {
@@ -707,7 +708,7 @@ mod tests {
     #[test]
     fn place_data_accepts_create_qr_code_bits_output() {
         use crate::qr_code::{create_qr_code_bits, EncodingMode, ErrorCorrectionLevel, MaskSetting, QrData, QrVersion};
-        let bits = create_qr_code_bits(&QrData::new("01234567", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Exact(1), MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrData::from_parts("01234567", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Exact(1), MaskSetting::Auto)).unwrap().bits;
         let mut matrix = QrMatrix::new(1, ErrorCorrectionLevel::M);
         matrix.place_data(&bits);
         // Mode indicator 0001: the first three modules light, the fourth dark.

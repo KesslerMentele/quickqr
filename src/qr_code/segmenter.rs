@@ -52,12 +52,10 @@ pub enum SegmentMode {
     Alphanumeric,
     #[default]
     Byte,
-    #[cfg(feature = "kanji")]
     Kanji,
     // ECI
 }
 impl SegmentMode {
-    #[cfg(feature = "kanji")]
     const ALL: [SegmentMode; 4] = [
         SegmentMode::Numeric,
         SegmentMode::Alphanumeric,
@@ -65,9 +63,6 @@ impl SegmentMode {
         SegmentMode::Kanji,
         // SegmentMode::ECI,
     ];
-
-    #[cfg(not(feature = "kanji"))]
-    const ALL: [SegmentMode;3] = [SegmentMode::Numeric, SegmentMode::Alphanumeric, SegmentMode::Byte];
 
     /// This mode's slot in a DP row.
     fn index(self) -> usize {
@@ -81,8 +76,14 @@ impl SegmentMode {
             SegmentMode::Numeric => c.is_ascii_digit().then_some(20),
             SegmentMode::Alphanumeric => alphanumeric_value(c).map(|_| 33),
             SegmentMode::Byte => Some(c.len_utf8() * 8 * 6),
-            #[cfg(feature = "kanji")]
-            SegmentMode::Kanji => shift_jis_kanji(c).ok().map(|_| 13 * 6),
+
+            SegmentMode::Kanji => {
+                #[cfg(not(feature = "kanji"))]
+                return None;
+
+                #[cfg(feature = "kanji")]
+                shift_jis_kanji(c).ok().map(|_| 13 * 6)
+            },
 
             // SegmentMode::ECI =>
         }
@@ -91,17 +92,16 @@ impl SegmentMode {
 impl fmt::Display for SegmentMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SegmentMode::Numeric => {
+            &SegmentMode::Numeric => {
                 write!(f, "numeric")
             }
-            SegmentMode::Alphanumeric => {
+            &SegmentMode::Alphanumeric => {
                 write!(f, "alphanumeric")
             }
-            SegmentMode::Byte => {
+            &SegmentMode::Byte => {
                 write!(f, "byte")
-            }
-            #[cfg(feature = "kanji")]
-            SegmentMode::Kanji => {
+            },
+            &SegmentMode::Kanji => {
                 write!(f, "kanji")
             }
         }
@@ -147,11 +147,8 @@ impl VersionGroup {
             (SegmentMode::Alphanumeric, VersionGroup::Large) => 13,
             (SegmentMode::Byte, VersionGroup::Small) => 8,
             (SegmentMode::Byte, _) => 16,
-            #[cfg(feature = "kanji")]
             (SegmentMode::Kanji, VersionGroup::Small) => 8,
-            #[cfg(feature = "kanji")]
             (SegmentMode::Kanji, VersionGroup::Medium) => 10,
-            #[cfg(feature = "kanji")]
             (SegmentMode::Kanji, VersionGroup::Large) => 12,
         }
     }
@@ -213,6 +210,7 @@ pub enum SegmentError {
     /// The data needs more bits than even version 40 holds at this error correction level.
     TooLong { needed_bits: usize },
 }
+impl std::error::Error for SegmentError {}
 
 impl fmt::Display for SegmentError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -242,11 +240,8 @@ impl fmt::Display for Step {
     }
 }
 
-#[cfg(feature = "kanji")]
 type DpTable = Vec<[Option<Step>; 4]>;
 
-#[cfg(not(feature = "kanji"))]
-type DpTable = Vec<[Option<Step>; 3]>;
 
 /// Rounds a cost in sixths of a bit up to a whole bit (still in sixths).
 fn round_up_to_bit(cost: usize) -> usize {
