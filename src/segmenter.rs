@@ -35,13 +35,12 @@
 
 use std::fmt;
 use std::ops::Range;
-use crate::qr_code::encoder::{alphanumeric_value};
-use super::{capacity};
-use super::{ErrorCorrectionLevel, QrVersion};
-
+use crate::capacity;
+use crate::encoder::alphanumeric_value;
 #[cfg(feature = "kanji")]
-use crate::qr_code::encoder::shift_jis_kanji;
-
+use crate::encoder::shift_jis_kanji;
+pub(crate) use crate::errors::CreateSegmentError;
+use crate::qr_code::{ErrorCorrectionLevel, QrVersion};
 
 /// The data modes that take part in segmentation. ECI, FNC1 and Structured Append are prefixes,
 /// not alternatives for encoding a run of characters, so they're added by the caller.
@@ -203,28 +202,6 @@ impl fmt::Display for SegmentPlan {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Copy)]
-pub enum SegmentError {
-    /// The data needs more bits than the requested version holds at this error correction level.
-    ExceedsVersionCapacity { needed_bits: usize, capacity_bits: usize },
-    /// The data needs more bits than even version 40 holds at this error correction level.
-    TooLong { needed_bits: usize },
-}
-impl std::error::Error for SegmentError {}
-
-impl fmt::Display for SegmentError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SegmentError::ExceedsVersionCapacity { .. } => {
-                write!(f, "too long for the requested version and error correction level")
-            }
-            SegmentError::TooLong { .. } => {
-                write!(f, "too long for any version at this error correction level")
-            }
-        }
-    }
-}
-
 /// A DP cell: the cheapest cost to reach it, and the mode of the cell it was reached from.
 /// `from` equal to this cell's own mode means the segment continued; anything else means a new
 /// segment was opened here.
@@ -359,7 +336,7 @@ pub(crate) fn best_single_mode(data: &str) -> SegmentMode {
 }
 
 /// Splits `data` into segments, choosing the version per `choice`.
-pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: ErrorCorrectionLevel, ) -> Result<SegmentPlan, SegmentError> {
+pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: ErrorCorrectionLevel, ) -> Result<SegmentPlan, CreateSegmentError> {
     // `choose_version` stops at the group it picks, so the last segmentation computed is that
     // group's.
     let mut segments = Vec::new();
@@ -378,7 +355,7 @@ pub(crate) fn choose_version(
     choice: QrVersion,
     error_correction_level: ErrorCorrectionLevel,
     mut bits_for: impl FnMut(VersionGroup) -> usize,
-) -> Result<(u8, usize), SegmentError> {
+) -> Result<(u8, usize), CreateSegmentError> {
     // A segment's character count can't overflow its count indicator here: in every group, the
     // longest count the indicator holds needs more bits than the group's largest version has, so
     // any data that passes the capacity check is representable.
@@ -387,7 +364,7 @@ pub(crate) fn choose_version(
             let needed_bits = bits_for(VersionGroup::of(version));
             let capacity_bits = data_capacity_bits(version, error_correction_level);
             if needed_bits > capacity_bits {
-                return Err(SegmentError::ExceedsVersionCapacity { needed_bits, capacity_bits });
+                return Err(CreateSegmentError::ExceedsVersionCapacity { needed_bits, capacity_bits });
             }
             Ok((version, needed_bits))
         }
@@ -402,7 +379,7 @@ pub(crate) fn choose_version(
                     return Ok((version, needed_bits));
                 }
             }
-            Err(SegmentError::TooLong { needed_bits })
+            Err(CreateSegmentError::TooLong { needed_bits })
         }
     }
 }
@@ -547,7 +524,7 @@ mod tests {
         // 4 + 16 + 3000 * 8 = 24020 bits, against 40-L's 23648.
         assert_eq!(
             segment(&"a".repeat(3000), QrVersion::Auto, ErrorCorrectionLevel::L),
-            Err(SegmentError::TooLong { needed_bits: 24020 })
+            Err(CreateSegmentError::TooLong { needed_bits: 24020 })
         );
     }
 
@@ -562,7 +539,7 @@ mod tests {
     fn fixed_rejects_data_that_does_not_fit() {
         assert_eq!(
             segment(&"a".repeat(20), QrVersion::Exact(1), ErrorCorrectionLevel::L),
-            Err(SegmentError::ExceedsVersionCapacity { needed_bits: 172, capacity_bits: 152 })
+            Err(CreateSegmentError::ExceedsVersionCapacity { needed_bits: 172, capacity_bits: 152 })
         );
     }
 

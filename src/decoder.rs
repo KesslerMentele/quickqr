@@ -1,72 +1,17 @@
 use std::fmt::{Display, Formatter};
+use bitvec::prelude::*;
+use crate::bits::{bits_to_bytes, bytes_to_bits};
+use crate::blocks::deinterleave;
+use crate::capacity::{ec_block_info, total_codewords};
+use crate::encoder::alphanumeric_char;
+use crate::errors::DecodeDataError;
+use crate::gf_math::{correct_block, EcLength, error_correction_codewords};
+use crate::qr_code::ErrorCorrectionLevel;
+use crate::segmenter::{SegmentMode, VersionGroup};
+use crate::structure::{bch_format_information, data_module_positions, format_information_positions, mask_predicate};
 // The inverse of `create_qr_code`. `decode_modules` takes a symbol's modules as plain row-major
 // bits, as a QR code reader would produce them, and works out everything else from those bits.
-use bitvec::prelude::*;
 
-use crate::qr_code::{
-    ErrorCorrectionLevel,
-    bits::{bits_to_bytes, bytes_to_bits},
-    blocks::deinterleave,
-    capacity::{ec_block_info, total_codewords},
-    encoder::alphanumeric_char,
-    gf_math::{correct_block, error_correction_codewords, EcLength},
-    segmenter::{SegmentMode, VersionGroup},
-    structure::{bch_format_information, data_module_positions, format_information_positions, mask_predicate}
-};
-
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub(crate) enum DecodeError {
-    /// This many modules isn't a square of any QR version's width.
-    InvalidModuleCount(usize),
-    /// Neither copy of the format information is close enough to a valid codeword to trust, so
-    /// the error correction level and mask are unknown.
-    UnreadableFormatInformation,
-    /// A block has more errors than its error correction codewuse encoding_rs::SHIFT_JIS;ords can repair.
-    UncorrectableBlock,
-    /// Ran out of bits midsegment.
-    UnexpectedEnd,
-    /// A mode indicator this decoder doesn't handle (ECI, FNC1, Structured Append, or a value the spec doesn't define)
-    UnsupportedMode(u8),
-    /// A Byte mode segment's bytes aren't valid UTF-8.
-    InvalidUtf8,
-    /// An Alphanumeric value outside 0..45, the width of QR's alphanumeric character set.
-    InvalidAlphanumericValue(u8),
-    /// A Kanji value that doesn't correspond to a Shift-JIS code point QR can represent.
-    #[cfg(feature = "kanji")]
-    InvalidKanjiCodePoint(u16),
-}
-
-impl Display for DecodeError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DecodeError::InvalidModuleCount(count) => {
-                write!(f, "invalid module count: {}", count)
-            }
-            DecodeError::UnreadableFormatInformation => {
-                write!(f, "unreadable format information")
-            }
-            DecodeError::UncorrectableBlock => {
-                write!(f, "uncorrectable block")
-            }
-            DecodeError::UnexpectedEnd => {
-                write!(f, "unexpected end")
-            }
-            DecodeError::UnsupportedMode(mode) => {
-                write!(f, "unsupported mode: {}", mode)
-            }
-            DecodeError::InvalidUtf8 => {
-                write!(f, "invalid UTF-8")
-            }
-            DecodeError::InvalidAlphanumericValue(val) => {
-                write!(f, "invalid alphanumeric value: {}", val)
-            }
-            #[cfg(feature = "kanji")]
-            DecodeError::InvalidKanjiCodePoint(val) => {
-                write!(f, "invalid kanji code point: {}", val)
-            }
-        }
-    }
-}
 
 /// A cursor over a bitstream, reading big-endian integers: the convention `write_bits` writes in.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
@@ -85,9 +30,9 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads `length` bits as a big-endian integer.
-    fn read(&mut self, length: usize) -> Result<u32, DecodeError> {
+    fn read(&mut self, length: usize) -> Result<u32, DecodeDataError> {
         if self.remaining() < length {
-            return Err(DecodeError::UnexpectedEnd);
+            return Err(DecodeDataError::UnexpectedEnd);
         }
         let value = self.bits[self.pos..self.pos + length]
             .iter()
@@ -105,7 +50,7 @@ impl<'a> Display for BitReader<'a> {
 
 /// Inverse of `encode_numeric`: a count, then digits in groups of three (10 bits), with a
 /// trailing group of two (7 bits) or one (4 bits).
-fn decode_numeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeError> {
+fn decode_numeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let mut remaining = reader.read(group.char_count_bits(SegmentMode::Numeric))? as usize;
     while remaining >= 3 {
         output.push_str(&format!("{:03}", reader.read(10)?));
@@ -122,38 +67,38 @@ fn decode_numeric(reader: &mut BitReader, group: VersionGroup, output: &mut Stri
 
 /// Inverse of `encode_alphanumeric`: a count, then characters in pairs (11 bits, `first * 45 +
 /// second`), with a trailing single character (6 bits).
-fn decode_alphanumeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeError> {
+fn decode_alphanumeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let mut remaining = reader.read(group.char_count_bits(SegmentMode::Alphanumeric))? as usize;
     while remaining >= 2 {
         let value = reader.read(11)?;
         let (first, second) = ((value / 45) as u8, (value % 45) as u8);
-        output.push(alphanumeric_char(first).ok_or(DecodeError::InvalidAlphanumericValue(first))?);
-        output.push(alphanumeric_char(second).ok_or(DecodeError::InvalidAlphanumericValue(second))?);
+        output.push(alphanumeric_char(first).ok_or(DecodeDataError::InvalidAlphanumericValue(first))?);
+        output.push(alphanumeric_char(second).ok_or(DecodeDataError::InvalidAlphanumericValue(second))?);
         remaining -= 2;
     }
     if remaining == 1 {
         let value = reader.read(6)? as u8;
-        output.push(alphanumeric_char(value).ok_or(DecodeError::InvalidAlphanumericValue(value))?);
+        output.push(alphanumeric_char(value).ok_or(DecodeDataError::InvalidAlphanumericValue(value))?);
     }
     Ok(())
 }
 
 /// Inverse of `encode_byte`: a byte count, then that many raw bytes, interpreted as UTF-8 (every
 /// Byte segment's range sits on char boundaries, so this is always a complete, valid string).
-fn decode_byte(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeError> {
+fn decode_byte(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let count = reader.read(group.char_count_bits(SegmentMode::Byte))? as usize;
     let mut bytes = Vec::with_capacity(count);
     for _ in 0..count {
         bytes.push(reader.read(8)? as u8);
     }
-    output.push_str(&String::from_utf8(bytes).map_err(|_| DecodeError::InvalidUtf8)?);
+    output.push_str(&String::from_utf8(bytes).map_err(|_| DecodeDataError::InvalidUtf8)?);
     Ok(())
 }
 
 /// Reverses `encode_kanji`'s transform on a single 13-bit value: back to the reduced Shift-JIS
 /// offset, then the code point, then the char it decodes to.
 #[cfg(feature = "kanji")]
-fn decode_kanji_char(value: u16) -> Result<char, DecodeError> {
+fn decode_kanji_char(value: u16) -> Result<char, DecodeDataError> {
     let reduced = (value / 0xC0) * 0x100 + value % 0xC0;
     let code_point = if reduced <= 0x9FFC - 0x8140 { reduced + 0x8140 } else { reduced + 0xC140 };
 
@@ -162,13 +107,13 @@ fn decode_kanji_char(value: u16) -> Result<char, DecodeError> {
     let mut chars = decoded.chars();
     match (had_errors, chars.next(), chars.next()) {
         (false, Some(c), None) => Ok(c),
-        _ => Err(DecodeError::InvalidKanjiCodePoint(code_point)),
+        _ => Err(DecodeDataError::InvalidKanjiCodePoint(code_point)),
     }
 }
 
 /// Inverse of `encode_kanji`: a count, then that many 13-bit values.
 #[cfg(feature = "kanji")]
-fn decode_kanji(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeError> {
+fn decode_kanji(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let count = reader.read(group.char_count_bits(SegmentMode::Kanji))? as usize;
     for _ in 0..count {
         output.push(decode_kanji_char(reader.read(13)? as u16)?);
@@ -177,17 +122,17 @@ fn decode_kanji(reader: &mut BitReader, group: VersionGroup, output: &mut String
 }
 
 /// The version whose symbol has exactly `module_count` modules, and that symbol's width.
-fn version_and_size(module_count: usize) -> Result<(u8, usize), DecodeError> {
+fn version_and_size(module_count: usize) -> Result<(u8, usize), DecodeDataError> {
     (1..=40u8)
         .map(|version| (version, version as usize * 4 + 17))
         .find(|&(_, size)| size * size == module_count)
-        .ok_or(DecodeError::InvalidModuleCount(module_count))
+        .ok_or(DecodeDataError::InvalidModuleCount(module_count))
 }
 
 /// Reads the error correction level and mask pattern from the format information. Picks the valid
 /// codeword closest to either copy, and gives up if even that is more than 3 bits away: the
 /// furthest BCH(15,5), with its minimum distance of 7, can reliably correct.
-fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<(ErrorCorrectionLevel, u8), DecodeError> {
+fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<(ErrorCorrectionLevel, u8), DecodeDataError> {
     let read_copy = |copy: usize| {
         (0..15).fold(0u32, |word, i| {
             let (row, col) = format_information_positions(size, i)[copy];
@@ -200,7 +145,7 @@ fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<
         .min()
         .expect("0..32 is not empty");
     if distance > 3 {
-        return Err(DecodeError::UnreadableFormatInformation);
+        return Err(DecodeDataError::UnreadableFormatInformation);
     }
     let level = match data >> 3 {
         0b01 => ErrorCorrectionLevel::L,
@@ -212,7 +157,7 @@ fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<
 }
 
 /// Decodes a symbol's modules, row-major with `true` for dark, back into the original string.
-pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, DecodeError> {
+pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, DecodeDataError> {
     let (version, size) = version_and_size(modules.len())?;
     let (level, mask) = read_format_information(modules, size)?;
 
@@ -235,7 +180,7 @@ pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, Dec
         let (data, error_correction) = corrected.split_at(corrected.len() - ec_per_block);
         // `correct_block` hands back its input when it gives up, so check the result is valid.
         if error_correction_codewords(data, ec_len) != error_correction {
-            return Err(DecodeError::UncorrectableBlock);
+            return Err(DecodeDataError::UncorrectableBlock);
         }
         data_codewords.extend_from_slice(data);
     }
@@ -245,7 +190,7 @@ pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, Dec
 /// Decodes `data_codewords` that have already been stripped of ec, terminator and padding
 /// back into the original string. Stops at the terminator (a `0000` mode indicator) or once
 /// fewer than 4 bits remain, whichever comes first.
-pub(crate) fn decode_segments(data_codewords: &[u8], version: u8) -> Result<String, DecodeError> {
+pub(crate) fn decode_segments(data_codewords: &[u8], version: u8) -> Result<String, DecodeDataError> {
     let bits = bytes_to_bits(data_codewords);
     let group = VersionGroup::of(version);
     let mut reader = BitReader::new(&bits);
@@ -259,7 +204,7 @@ pub(crate) fn decode_segments(data_codewords: &[u8], version: u8) -> Result<Stri
             0b0100 => decode_byte(&mut reader, group, &mut output)?,
             #[cfg(feature = "kanji")]
             0b1000 => decode_kanji(&mut reader, group, &mut output)?,
-            other => return Err(DecodeError::UnsupportedMode(other as u8)),
+            other => return Err(DecodeDataError::UnsupportedMode(other as u8)),
         }
     }
     Ok(output)
@@ -267,8 +212,10 @@ pub(crate) fn decode_segments(data_codewords: &[u8], version: u8) -> Result<Stri
 
 #[cfg(test)]
 mod tests {
+    use crate::bits::write_bits;
+    use crate::capacity::data_codewords;
     use super::*;
-    use crate::qr_code::{capacity::{data_codewords}, create_qr_code, EncodingMode, MaskSetting, QrData, QrVersion};
+    use crate::qr_code::{create_qr_code, EncodingMode, MaskSetting, QrData, QrVersion};
 
     /// What a reader would hand over for `data` at 1-M under `mask`: bits and nothing else.
     fn scanned(data: &str, mask: u8) -> BitVec<u8, Lsb0> {
@@ -333,7 +280,7 @@ mod tests {
         for position in data_module_positions(1) {
             toggle(&mut modules, 21, position);
         }
-        assert_eq!(decode_modules(&modules), Err(DecodeError::UncorrectableBlock));
+        assert_eq!(decode_modules(&modules), Err(DecodeDataError::UncorrectableBlock));
     }
 
     #[test]
@@ -367,14 +314,14 @@ mod tests {
                 modules.set(row * 21 + col, (unreadable >> i) & 1 == 1);
             }
         }
-        assert_eq!(decode_modules(&modules), Err(DecodeError::UnreadableFormatInformation));
+        assert_eq!(decode_modules(&modules), Err(DecodeDataError::UnreadableFormatInformation));
     }
 
     #[test]
     fn decode_modules_rejects_counts_that_are_not_a_version_size() {
         for count in [0, 440, 23 * 23, 181 * 181] {
             let modules = bitvec![u8, Lsb0; 0; count];
-            assert_eq!(decode_modules(&modules), Err(DecodeError::InvalidModuleCount(count)));
+            assert_eq!(decode_modules(&modules), Err(DecodeDataError::InvalidModuleCount(count)));
         }
     }
 
@@ -387,7 +334,7 @@ mod tests {
     #[test]
     fn decodes_an_alphanumeric_segment_with_an_odd_trailing_character() {
         // ISO/IEC 18004 Annex I: "AC-42" is mode 0010, count 5 in 9 bits, then data.
-        use crate::qr_code::bits::write_bits;
+
         let mut bits = BitVec::new();
         for (value, bit_length) in [(0b0010, 4), (5, 9), (10 * 45 + 12, 11), (41 * 45 + 4, 11), (2, 6)] {
             write_bits(&mut bits, value, bit_length);
@@ -399,7 +346,6 @@ mod tests {
     #[test]
     fn decodes_a_byte_segment_with_multibyte_utf8() {
         let mut bits = BitVec::new();
-        use crate::qr_code::bits::write_bits;
         write_bits(&mut bits, 0b0100, 4);
         write_bits(&mut bits, 2, 8);
         write_bits(&mut bits, 0xC3, 8);
@@ -412,7 +358,6 @@ mod tests {
     #[cfg(feature = "kanji")]
     fn decodes_a_kanji_segment() {
         let mut bits = BitVec::new();
-        use crate::qr_code::bits::write_bits;
         write_bits(&mut bits, 0b1000, 4);
         write_bits(&mut bits, 1, 8);
         write_bits(&mut bits, 0x0D9F, 13);

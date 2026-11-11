@@ -271,6 +271,7 @@ impl fmt::Display for Gf256Polynomial {
     }
 }
 
+/// The position and locator of an error in the data, found via Chien Search.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
 struct LocatedError {
     position: usize,

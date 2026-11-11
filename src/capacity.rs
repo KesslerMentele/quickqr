@@ -3,8 +3,8 @@
 // correction codewords; data codewords are whatever is left, spread as evenly as possible across
 // the blocks.
 
-use std::fmt::{Display};
-use super::ErrorCorrectionLevel;
+use std::fmt;
+use crate::qr_code::ErrorCorrectionLevel;
 
 /// Error correction block characteristics for one version and level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash, Default)]
@@ -17,7 +17,7 @@ pub(crate) struct EcBlockInfo {
     pub(crate) group_2_data_codewords: u16,
 }
 
-impl Display for EcBlockInfo {
+impl fmt::Display for EcBlockInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "total_data_codewords: {}, ec_codewords_per_block: {}, group_1_blocks: {}, group_1_data_codewords: {}, group_2_blocks: {}, group_2_data_codewords: {}",
                self.total_data_codewords,

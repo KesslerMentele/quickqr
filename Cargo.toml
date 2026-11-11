@@ -2,15 +2,24 @@
 name = "quickqr"
 version = "0.1.0"
 edition = "2024"
+description  = "…"
+license      = "MIT"
+#repository   = "https://github.com/…/quickqr"
+#readme       = "README.md"
+keywords     = ["qr", "qrcode", "barcode", "encoder"]
+categories   = ["encoding", "multimedia::images"]
+rust-version = "1.85.1"
+
 
 [dependencies]
-bitvec = "1.1.1"
+bitvec = {version = "1.1.1"  }
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 encoding_rs = { version = "0.8.44", features = ["fast-kanji-encode"], optional = true }
+prelude = "0.2.1"
 
 
 [features]
-serde = ["dep:serde"]
+serde = ["dep:serde","bitvec/serde"]
 kanji = ["dep:encoding_rs"]
 
 [dev-dependencies]

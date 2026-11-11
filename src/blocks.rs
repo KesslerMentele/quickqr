@@ -1,9 +1,8 @@
 use bitvec::prelude::*;
-use crate::qr_code::{
-    ErrorCorrectionLevel, bits::bits_to_bytes, 
-    capacity::{ec_block_info, EcBlockInfo}, 
-    gf_math::{error_correction_codewords, EcLength}
-};
+use crate::bits::bits_to_bytes;
+use crate::capacity::{ec_block_info, EcBlockInfo};
+use crate::gf_math::{error_correction_codewords, EcLength};
+use crate::qr_code::ErrorCorrectionLevel;
 
 /// Slices `data` into its error-correction blocks (group 1's, then group 2's, preserving that
 /// order since interleaving walks blocks in this order), borrowing from `data` rather than
@@ -87,9 +86,9 @@ pub(crate) fn deinterleave(codewords: &[u8], info: EcBlockInfo) -> Vec<Vec<u8>> 
 
 #[cfg(test)]
 mod tests {
+    use crate::bits::bytes_to_bits;
+    use crate::capacity::data_codewords;
     use super::*;
-    use crate::qr_code::bits::bytes_to_bits;
-    use crate::qr_code::capacity::data_codewords;
 
     #[test]
     fn deinterleave_undoes_interleave_across_unequal_blocks() {

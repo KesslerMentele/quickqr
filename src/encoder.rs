@@ -19,56 +19,19 @@ use core::fmt;
 use bitvec::prelude::*;
 #[cfg(feature = "kanji")]
 use encoding_rs::{EncoderResult, SHIFT_JIS};
-use crate::qr_code::{
-    EncodedData, EncodingMode, ErrorCorrectionLevel,
-    QrCreationError, QrVersion, SegmentStats,
-    capacity, bits::write_bits,
-    gf_math::{error_correction_codewords, EcLength},
-    segmenter::{choose_version, SegmentMode, SegmentPlan, VersionGroup},
-};
-
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum EncodeError {
-    /// A character isn't part of the character set the mode being encoded requires.
-    InvalidChar(char),
-    /// A double-byte Shift-JIS code point outside the two ranges QR Kanji mode can represent.
-    KanjiOutOfRange(u16),
-    /// An ECI designator outside the 0..=999999 range the three encoding lengths can hold.
-    EciOutOfRange(u32),
-    /// A structured-append sequence number or total-symbol count outside 0..=15.
-    StructuredAppendOutOfRange,
-    /// The requested encoding mode has not been implemented.
-    NotImplemented
-}
-impl std::error::Error for EncodeError {}
-impl fmt::Display for EncodeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            EncodeError::InvalidChar(char) => {
-                write!(f, "Invalid character '{}'", char)
-            }
-            EncodeError::KanjiOutOfRange(val) => {
-                write!(f, "Kanji out of range: {}", val)
-            }
-            EncodeError::EciOutOfRange(val) => {
-                write!(f, "Eci out of range: {}", val)
-            }
-            EncodeError::StructuredAppendOutOfRange => {
-                write!(f, "Structured append out of range")
-            }
-            EncodeError::NotImplemented => {
-                write!(f, "Not implemented")
-            }
-        }
-    }
-}
+use crate::bits::write_bits;
+use crate::capacity;
+pub(crate) use crate::errors::{CreateQrError, EncodeDataError};
+use crate::gf_math::{error_correction_codewords, EcLength};
+use crate::qr_code::{EncodedData, EncodingMode, ErrorCorrectionLevel, QrVersion, SegmentStats};
+use crate::segmenter::{choose_version, SegmentMode, SegmentPlan, VersionGroup};
 
 /// Encodes `data` (ASCII digits only) as QR Numeric mode data bits: digits are grouped by
 /// three, each group packed as 10 bits, except a trailing group of two (7 bits) or one (4 bits).
-fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let digits = data
         .chars()
-        .map(|c| c.to_digit(10).ok_or(EncodeError::InvalidChar(c)))
+        .map(|c| c.to_digit(10).ok_or(EncodeDataError::InvalidChar(c)))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut bits = BitVec::new();
@@ -88,10 +51,10 @@ fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
 /// Encodes `data` (QR's 45-character alphanumeric set) as QR Alphanumeric mode data bits:
 /// characters are grouped in pairs, each pair packed as `first * 45 + second` in 11 bits,
 /// except a trailing single character (6 bits).
-fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let values = data
         .chars()
-        .map(|c| alphanumeric_value(c).ok_or(EncodeError::InvalidChar(c)))
+        .map(|c| alphanumeric_value(c).ok_or(EncodeDataError::InvalidChar(c)))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut bits = BitVec::new();
@@ -108,7 +71,7 @@ fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
 /// Maps a character to its double-byte Shift-JIS code point, if it has one in either of the two
 /// ranges QR Kanji mode can represent (0x8140..=0x9FFC, 0xE040..=0xEBBF).
 #[cfg(feature = "kanji")]
-pub(crate) fn shift_jis_kanji(c: char) -> Result<u16, EncodeError> {
+pub(crate) fn shift_jis_kanji(c: char) -> Result<u16, EncodeDataError> {
     let mut utf8 = [0u8; 4];
     let mut sjis = [0u8; 2];
     let (result, _, written) = SHIFT_JIS
@@ -117,13 +80,13 @@ pub(crate) fn shift_jis_kanji(c: char) -> Result<u16, EncodeError> {
 
     // Unmappable chars and single-byte ones (ASCII, half-width katakana) aren't Kanji.
     if !matches!(result, EncoderResult::InputEmpty) || written != 2 {
-        return Err(EncodeError::InvalidChar(c));
+        return Err(EncodeDataError::InvalidChar(c));
     }
 
     let code_point = u16::from_be_bytes(sjis);
     match code_point {
         0x8140..=0x9FFC | 0xE040..=0xEBBF => Ok(code_point),
-        _ => Err(EncodeError::KanjiOutOfRange(code_point)),
+        _ => Err(EncodeDataError::KanjiOutOfRange(code_point)),
     }
 }
 
@@ -140,7 +103,7 @@ fn encode_byte(data: &str) -> BitVec<u8, Lsb0> {
 /// Encodes `data` as QR Kanji mode data bits: each char is transcoded to its two-byte Shift-JIS
 /// code point, reduced into its QR subset range and packed into 13 bits.
 #[cfg(feature = "kanji")]
-fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let mut bits = BitVec::new();
     for c in data.chars() {
         let code_point = shift_jis_kanji(c)?;
@@ -158,7 +121,7 @@ fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeError> {
 /// Encodes an ECI assignment number as QR ECI mode data bits, using the UTF-8-like
 /// variable-length prefix scheme the spec defines: 1 byte for 0..=127, 2 bytes for
 /// 128..=16383, 3 bytes for 16384..=999999.
-fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let mut bits = BitVec::new();
     match designator {
         0..=127 => {
@@ -173,7 +136,7 @@ fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeError> {
             write_bits(&mut bits, 0b110, 3);
             write_bits(&mut bits, designator, 21);
         }
-        _ => return Err(EncodeError::EciOutOfRange(designator)),
+        _ => return Err(EncodeDataError::EciOutOfRange(designator)),
     }
     Ok(bits)
 }
@@ -194,9 +157,9 @@ fn encode_fnc1_second_position(application_indicator: u8) -> BitVec<u8, Lsb0> {
 
 /// Encodes Structured Append's header fields as QR data bits: a 4-bit sequence number, a
 /// 4-bit total-symbol count (both 0..=15), and an 8-bit parity byte.
-fn encode_structured_append(sequence_number: u8, total_symbols: u8, parity: u8, ) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+fn encode_structured_append(sequence_number: u8, total_symbols: u8, parity: u8, ) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     if sequence_number > 15 || total_symbols > 15 {
-        return Err(EncodeError::StructuredAppendOutOfRange);
+        return Err(EncodeDataError::StructuredAppendOutOfRange);
     }
 
     let mut bits = BitVec::new();
@@ -278,7 +241,7 @@ pub(crate) fn alphanumeric_char(value: u8) -> Option<char> {
 
 /// Encodes every segment of `plan` as a header followed by its data bits, back to back with no
 /// byte alignment between segments.
-pub(crate) fn encode_data_by_encoding_plan(data:&str, plan: SegmentPlan) -> Result<EncodedData, QrCreationError> {
+pub(crate) fn encode_data_by_encoding_plan(data:&str, plan: SegmentPlan) -> Result<EncodedData, CreateQrError> {
     let group = VersionGroup::of(plan.version);
     let mut bits = BitVec::with_capacity(plan.data_bits_length);
     let mut segments = Vec::with_capacity(plan.segments.len());
@@ -297,7 +260,7 @@ pub(crate) fn encode_single_segment(
     mode: SegmentMode,
     choice: QrVersion,
     error_correction_level: ErrorCorrectionLevel,
-) -> Result<EncodedData, QrCreationError> {
+) -> Result<EncodedData, CreateQrError> {
     let mut data_bits = encode_data_with_mode(data, EncodingMode::try_from(mode)?)?;
     let (version, needed_bits) = choose_version(choice, error_correction_level, |group| {
         4 + group.char_count_bits(mode) + data_bits.len()
@@ -395,7 +358,7 @@ pub(crate) fn apply_error_correction(
     bits
 }
 
-pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitVec<u8, Lsb0>, EncodeError> {
+pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     match mode {
         EncodingMode::Numeric => {
             Ok(encode_numeric(data)?)
@@ -411,13 +374,14 @@ pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitV
             Ok(encode_kanji(data)?)
         }
         _ => {
-            Err(EncodeError::NotImplemented)
+            Err(EncodeDataError::NotImplemented)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::segmenter::Segment;
     use super::*;
 
     #[test]
@@ -446,7 +410,7 @@ mod tests {
 
     #[test]
     fn numeric_rejects_a_non_digit() {
-        assert_eq!(encode_numeric("12a").unwrap_err(), EncodeError::InvalidChar('a'));
+        assert_eq!(encode_numeric("12a").unwrap_err(), EncodeDataError::InvalidChar('a'));
     }
 
     #[test]
@@ -465,7 +429,7 @@ mod tests {
 
     #[test]
     fn alphanumeric_rejects_a_char_outside_the_set() {
-        assert_eq!(encode_alphanumeric("A!").unwrap_err(), EncodeError::InvalidChar('!'));
+        assert_eq!(encode_alphanumeric("A!").unwrap_err(), EncodeDataError::InvalidChar('!'));
     }
 
     #[test]
@@ -495,22 +459,22 @@ mod tests {
     #[test]
     #[cfg(feature = "kanji")]
     fn kanji_rejects_single_byte_shift_jis_chars() {
-        assert_eq!(encode_kanji("a").unwrap_err(), EncodeError::InvalidChar('a'));
+        assert_eq!(encode_kanji("a").unwrap_err(), EncodeDataError::InvalidChar('a'));
         // Half-width katakana is a single Shift-JIS byte.
-        assert_eq!(encode_kanji("ｱ").unwrap_err(), EncodeError::InvalidChar('ｱ'));
+        assert_eq!(encode_kanji("ｱ").unwrap_err(), EncodeDataError::InvalidChar('ｱ'));
     }
 
     #[test]
     #[cfg(feature = "kanji")]
     fn kanji_rejects_a_char_with_no_shift_jis_mapping() {
-        assert_eq!(encode_kanji("é").unwrap_err(), EncodeError::InvalidChar('é'));
+        assert_eq!(encode_kanji("é").unwrap_err(), EncodeDataError::InvalidChar('é'));
     }
 
     #[test]
     #[cfg(feature = "kanji")]
     fn kanji_rejects_a_code_point_outside_either_range() {
         // 纊 only exists in the IBM extension block, at Shift-JIS 0xFA5C.
-        assert_eq!(encode_kanji("纊").unwrap_err(), EncodeError::KanjiOutOfRange(0xFA5C));
+        assert_eq!(encode_kanji("纊").unwrap_err(), EncodeDataError::KanjiOutOfRange(0xFA5C));
     }
 
     #[test]
@@ -536,7 +500,7 @@ mod tests {
 
     #[test]
     fn eci_rejects_a_designator_above_999999() {
-        assert_eq!(encode_eci(1_000_000).unwrap_err(), EncodeError::EciOutOfRange(1_000_000));
+        assert_eq!(encode_eci(1_000_000).unwrap_err(), EncodeDataError::EciOutOfRange(1_000_000));
     }
 
     #[test]
@@ -559,7 +523,6 @@ mod tests {
     }
 
     fn single_segment_plan(mode: SegmentMode, data: &str, version: u8) -> SegmentPlan {
-        use crate::qr_code::{segmenter::Segment};
         SegmentPlan {
             version: version ,
             segments: vec![Segment { mode, range: 0..data.len() }],
@@ -711,7 +674,7 @@ mod tests {
     fn structured_append_rejects_a_sequence_number_above_15() {
         assert_eq!(
             encode_structured_append(16, 0, 0).unwrap_err(),
-            EncodeError::StructuredAppendOutOfRange
+            EncodeDataError::StructuredAppendOutOfRange
         );
     }
 }

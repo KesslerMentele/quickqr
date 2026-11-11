@@ -1,38 +1,14 @@
 use std::fmt;
 use bitvec::prelude::*;
 use std::ops::RangeInclusive;
-use crate::qr_code::{
-    bits::bytes_to_bits,
-    blocks::interleave,
-    structure::{QrMatrix, MaskError},
-    encoder::{apply_formatting, encode_data_by_encoding_plan, encode_single_segment, EncodeError},
-    segmenter::{best_single_mode, segment, SegmentError, SegmentMode},
-};
-
-
+use crate::bits::bytes_to_bits;
+use crate::blocks::interleave;
+use crate::encoder::{apply_formatting, encode_data_by_encoding_plan, encode_single_segment};
+pub(crate) use crate::errors::{CreateQrError, VersionError};
+use crate::segmenter::{segment, SegmentMode, best_single_mode};
+use crate::structure::QrMatrix;
 // The encoding pipeline. Crate-private: `prelude` re-exports the few types users need, so these
 // modules can change without a breaking release.
-pub(crate) mod penalty_score;
-pub(crate) mod gf_math;
-pub(crate) mod encoder;
-pub(crate) mod decoder;
-pub(crate) mod bits;
-pub(crate) mod segmenter;
-pub(crate) mod capacity;
-pub(crate) mod structure;
-pub(crate) mod blocks;
-pub(crate) mod prelude;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum VersionError {
-    OutOfBounds(u8)
-}
-impl std::error::Error for VersionError {}
-impl fmt::Display for VersionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self { VersionError::OutOfBounds(version) => {write!(f, "QR version out of bounds: {}", version)} }
-    }
-}
 
 /// The symbol versions QR codes come in.
 const VERSIONS: RangeInclusive<u8> = 1..=40;
@@ -77,9 +53,9 @@ pub enum EncodingMode {
     Segmented
 }
 impl TryFrom<SegmentMode> for EncodingMode {
-    type Error = QrCreationError;
+    type Error = CreateQrError;
 
-    fn try_from(value: SegmentMode) -> Result<Self, QrCreationError> {
+    fn try_from(value: SegmentMode) -> Result<Self, CreateQrError> {
         match value {
             SegmentMode::Numeric => {Ok(EncodingMode::Numeric)}
             SegmentMode::Alphanumeric => { Ok(EncodingMode::Alphanumeric)}
@@ -90,7 +66,7 @@ impl TryFrom<SegmentMode> for EncodingMode {
                     Ok(EncodingMode::Kanji)
 
                 } else {
-                    Err(QrCreationError::FeatureNotEnabled("kanji"))
+                    Err(CreateQrError::FeatureNotEnabled("kanji"))
                 }
 
             }
@@ -117,60 +93,6 @@ pub enum ErrorCorrectionLevel {
          write!(f, "{:?}", self)
      }
  }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum QrCreationError {
-    InvalidQrVersion(VersionError),
-    NotSegmentable(SegmentError),
-    NotImplemented(EncodingMode),
-    EncodingFailed(EncodeError),
-    MaskingFailed(MaskError),
-    FeatureNotEnabled(&'static str)
-}
-impl std::error::Error for QrCreationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { match self { 
-        QrCreationError::InvalidQrVersion(error) => Some(error),
-        QrCreationError::NotSegmentable(error) => Some(error),
-        QrCreationError::NotImplemented(_) => None,
-        QrCreationError::EncodingFailed(error) => Some(error),
-        QrCreationError::MaskingFailed(error) => Some(error),
-        QrCreationError::FeatureNotEnabled(_) => None
-    } }
-}
-impl From<SegmentError> for QrCreationError {
-    fn from(value: SegmentError) -> Self { QrCreationError::NotSegmentable(value) }
-}
-impl From<VersionError> for QrCreationError {
-    fn from(value: VersionError) -> Self { QrCreationError::InvalidQrVersion(value) }
-}
-impl From<EncodeError> for QrCreationError {
-    fn from(value: EncodeError) -> Self { QrCreationError::EncodingFailed(value) }
-}
-impl fmt::Display for QrCreationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            QrCreationError::InvalidQrVersion(_) => {
-                write!(f, "invalid QR version")
-            }
-            QrCreationError::NotSegmentable(_) => {
-                write!(f, "qr data is too large to be segmented")
-            }
-            QrCreationError::NotImplemented(mode) => {
-                write!(f, "requested encoding mode is not implemented: {}", mode)
-            }
-            QrCreationError::EncodingFailed(_) => {
-                write!(f, "qr encoding failed")
-            }
-            QrCreationError::MaskingFailed(_) => {
-                write!(f, "qr masking failed")
-            }
-            QrCreationError::FeatureNotEnabled(feature_name) => {
-                write!(f, "feature not enabled: {}", feature_name)
-            }
-        }
-    }
-}
-
 
 /// Encoded segment bits (headers and data, no terminator or padding yet), and the version they
 /// were sized for.
@@ -276,8 +198,9 @@ impl fmt::Display for QrStats {
 /// A finished QR code: a square grid of dark and light modules, plus how it was built.
 /// Make one with [`QrData::build`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrCode {
-    matrix: QrMatrix,
+    pub(crate) matrix: QrMatrix,
     stats: QrStats,
 }
 impl QrCode {
@@ -343,11 +266,11 @@ impl fmt::Display for MaskSetting {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrData {
-    text: String,
-    error_correction_level: ErrorCorrectionLevel,
-    encoding_mode: EncodingMode,
-    version: QrVersion,
-    mask: MaskSetting
+    pub(crate) text: String,
+    pub(crate) error_correction_level: ErrorCorrectionLevel,
+    pub(crate) encoding_mode: EncodingMode,
+    pub(crate) version: QrVersion,
+    pub(crate) mask: MaskSetting
 }
 impl QrData {
     /// Settings for encoding `text`, with every other setting at its default.
@@ -397,7 +320,7 @@ impl QrData {
     ///
     /// If the text doesn't fit the requested version (or any version), contains characters the
     /// requested encoding mode can't represent, or asks for a mode that isn't available.
-    pub fn build(&self) -> Result<QrCode, QrCreationError> {
+    pub fn build(&self) -> Result<QrCode, CreateQrError> {
         create_qr_code(self)
     }
 }
@@ -502,9 +425,9 @@ mod auto_or_number {
     }
 }
 
-fn create_qr_code_bits(
+pub(crate) fn create_qr_code_bits(
     data: &QrData
-) -> Result<EncodedData, QrCreationError> {
+) -> Result<EncodedData, CreateQrError> {
     
     let mode = match data.encoding_mode {
         EncodingMode::Segmented => {
@@ -521,10 +444,10 @@ fn create_qr_code_bits(
         }
         #[cfg(not(feature = "kanji"))]
         EncodingMode::Kanji => {
-            return Err(QrCreationError::FeatureNotEnabled("kanji"))
+            return Err(CreateQrError::FeatureNotEnabled("kanji"))
         },
         mode @ (EncodingMode::Eci | EncodingMode::Fnc1 | EncodingMode::StructuredAppend) => {
-            return Err(QrCreationError::NotImplemented(mode));
+            return Err(CreateQrError::NotImplemented(mode));
         }
     };
     encode_single_segment(&*data.text, mode, data.version, data.error_correction_level)
@@ -541,13 +464,13 @@ fn create_error_corrected_data(encoded_data: EncodedData, error_correction_level
         encoded_data.version, error_correction_level)
 }
 
-pub(crate) fn create_qr_code(data: &QrData) -> Result<QrCode, QrCreationError> {
+pub(crate) fn create_qr_code(data: &QrData) -> Result<QrCode, CreateQrError> {
     let encoded_data = create_qr_code_bits(data)?;
     let segments = encoded_data.segments.clone();
     let mut matrix = QrMatrix::new(encoded_data.version, data.error_correction_level);
     let error_corrected_data = create_error_corrected_data(encoded_data, data.error_correction_level);
     matrix.place_data(&error_corrected_data);
-    matrix.set_mask(data.mask).map_err(QrCreationError::MaskingFailed)?;
+    matrix.set_mask(data.mask).map_err(CreateQrError::MaskingFailed)?;
     let stats = QrStats {
         version: matrix.version(),
         error_correction_level: data.error_correction_level,
@@ -560,8 +483,10 @@ pub(crate) fn create_qr_code(data: &QrData) -> Result<QrCode, QrCreationError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::bits::write_bits;
+    use crate::decoder::decode_modules;
+    use crate::errors::{CreateSegmentError, EncodeDataError};
     use super::*;
-    use super::bits::write_bits;
 
     fn v(version: u8) -> QrVersion { QrVersion::Exact(version) }
 
@@ -613,7 +538,7 @@ mod tests {
     #[test]
     fn segmented_rejects_data_that_does_not_fit_a_fixed_version() {
         let result = create_qr_code_bits(&QrData::from_parts(&"a".repeat(20), ErrorCorrectionLevel::L, EncodingMode::Segmented, v(1), MaskSetting::Auto));
-        assert!(matches!(result, Err(QrCreationError::NotSegmentable(SegmentError::ExceedsVersionCapacity { .. }))));
+        assert!(matches!(result, Err(CreateQrError::NotSegmentable(CreateSegmentError::ExceedsVersionCapacity { .. }))));
     }
 
     #[test]
@@ -658,20 +583,20 @@ mod tests {
     #[test]
     fn auto_detect_rejects_data_too_long_for_version_40() {
         let result = create_qr_code_bits(&QrData::from_parts(&"a".repeat(3000), ErrorCorrectionLevel::L, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto));
-        assert!(matches!(result, Err(QrCreationError::NotSegmentable(SegmentError::TooLong { needed_bits: 24020 }))));
+        assert!(matches!(result, Err(CreateQrError::NotSegmentable(CreateSegmentError::TooLong { needed_bits: 24020 }))));
     }
 
     #[test]
     fn fixed_mode_rejects_chars_outside_its_set() {
         let result = create_qr_code_bits(&QrData::from_parts("12a", ErrorCorrectionLevel::M, EncodingMode::Numeric, QrVersion::Auto, MaskSetting::Auto));
-        assert!(matches!(result, Err(QrCreationError::EncodingFailed(EncodeError::InvalidChar('a')))));
+        assert!(matches!(result, Err(CreateQrError::EncodingFailed(EncodeDataError::InvalidChar('a')))));
     }
 
     #[test]
     fn prefix_modes_are_not_implemented() {
         for mode in [EncodingMode::Eci, EncodingMode::Fnc1, EncodingMode::StructuredAppend] {
             let result = create_qr_code_bits(&QrData::from_parts("1", ErrorCorrectionLevel::M, mode, QrVersion::Auto, MaskSetting::Auto));
-            assert!(matches!(result, Err(QrCreationError::NotImplemented(_))));
+            assert!(matches!(result, Err(CreateQrError::NotImplemented(_))));
         }
     }
 
@@ -779,7 +704,6 @@ mod tests {
 
     #[test]
     fn create_qr_code_round_trips_to_the_original_string() {
-        use crate::qr_code::decoder::decode_modules;
 
         let cases = [
             ("01234567", ErrorCorrectionLevel::M),

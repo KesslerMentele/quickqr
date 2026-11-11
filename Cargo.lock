@@ -10,6 +10,7 @@ checksum = "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837"
 dependencies = [
  "funty",
  "radium",
+ "serde",
  "tap",
  "wyz",
 ]
@@ -65,6 +66,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
+name = "prelude"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c70d2a17efd6d4063aa8a13d2ce7b0ceeef96ed9e2138c2803f7f4f9824c2cbb"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -79,6 +86,7 @@ version = "0.1.0"
 dependencies = [
  "bitvec",
  "encoding_rs",
+ "prelude",
  "serde",
  "serde_json",
 ]

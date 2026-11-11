@@ -18,7 +18,9 @@
 use std::fmt;
 use std::ops::RangeInclusive;
 use bitvec::prelude::*;
-use crate::qr_code::{penalty_score::penalty_score, ErrorCorrectionLevel, MaskSetting};
+pub(crate) use crate::errors::ApplyMaskError;
+use crate::penalty_score::penalty_score;
+use crate::qr_code::{ErrorCorrectionLevel, MaskSetting};
 
 /// Alignment pattern center coordinates for each version, indexed by `version - 1`. Every pairing
 /// of two coordinates is a center, apart from the three that overlap a finder pattern.
@@ -65,23 +67,10 @@ const ALIGNMENT_PATTERN_COORDINATES: [&[u8]; 40] = [
     &[6, 30, 58, 86, 114, 142, 170],
 ];
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum MaskError {
-    /// `pattern` is outside the valid 0-7 range of mask patterns.
-    InvalidMaskVersion(u8),
-}
-impl std::error::Error for MaskError {}
-impl fmt::Display for MaskError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self { MaskError::InvalidMaskVersion(version) => {
-            write!(f, "invalid mask version {}", version)
-        } }
-    }
-}
-
 /// A square grid of modules, stored row-major (the layout `penalty_score` expects), alongside
 /// which of those modules belong to a function pattern.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrMatrix {
     version: u8,
     error_correction_level: ErrorCorrectionLevel,
@@ -329,7 +318,7 @@ impl QrMatrix {
 
     /// Toggles every non-function module for which `mask_predicate(pattern)` holds. Applying
     /// the same pattern twice cancels out, since masking is its own inverse.
-    fn apply_mask(&mut self, pattern: u8) -> Result<(), MaskError> {
+    fn apply_mask(&mut self, pattern: u8) -> Result<(), ApplyMaskError> {
         let predicate = mask_predicate(pattern)?;
         for row in 0..self.size {
             for col in 0..self.size {
@@ -353,7 +342,7 @@ impl QrMatrix {
     ///
     /// Returns `Err(MaskError::InvalidMaskVersion(pattern))`, without changing anything, if
     /// `pattern` is greater than 7.
-    pub(crate) fn set_mask(&mut self, pattern: MaskSetting) -> Result<(), MaskError> {
+    pub(crate) fn set_mask(&mut self, pattern: MaskSetting) -> Result<(), ApplyMaskError> {
         match pattern {
             MaskSetting::Exact(val) => {
                 mask_predicate(val)?;
@@ -384,7 +373,7 @@ impl QrMatrix {
     /// without changing the mask actually applied to `self`. See `modules`.
     ///
     /// Returns `Err(MaskError::InvalidMaskVersion(pattern))` if `pattern` is greater than 7.
-    pub(crate) fn with_mask(&self, pattern: u8) -> Result<BitVec<u8, Lsb0>, MaskError> {
+    pub(crate) fn with_mask(&self, pattern: u8) -> Result<BitVec<u8, Lsb0>, ApplyMaskError> {
         let mut candidate = self.clone();
         candidate.set_mask(MaskSetting::Exact(pattern))?;
         Ok(candidate.modules)
@@ -426,7 +415,7 @@ fn bch_remainder(data: u32, generator: u32) -> u32 {
 /// module". ISO/IEC 18004 Table 10.
 ///
 /// Returns `Err(MaskError::InvalidMaskVersion(pattern))` if `pattern` is greater than 7.
-pub(crate) fn mask_predicate(pattern: u8) -> Result<fn(usize, usize) -> bool, MaskError> {
+pub(crate) fn mask_predicate(pattern: u8) -> Result<fn(usize, usize) -> bool, ApplyMaskError> {
     match pattern {
         0 => Ok(|row: usize, col: usize| (row + col) % 2 == 0),
         1 => Ok(|row: usize, _col: usize| row % 2 == 0),
@@ -436,7 +425,7 @@ pub(crate) fn mask_predicate(pattern: u8) -> Result<fn(usize, usize) -> bool, Ma
         5 => Ok(|row: usize, col: usize| (row * col) % 2 + (row * col) % 3 == 0),
         6 => Ok(|row: usize, col: usize| ((row * col) % 2 + (row * col) % 3) % 2 == 0),
         7 => Ok(|row: usize, col: usize| ((row * col) % 3 + (row + col) % 2) % 2 == 0),
-        _ => Err(MaskError::InvalidMaskVersion(pattern)),
+        _ => Err(ApplyMaskError::InvalidMaskVersion(pattern)),
     }
 }
 
@@ -475,8 +464,8 @@ pub(crate) fn data_module_positions(version: u8) -> Vec<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::capacity::raw_data_modules;
     use super::*;
-    use crate::qr_code::capacity::raw_data_modules;
 
     /// Renders a region as rows of `#` (dark function), `.` (light function) or ` ` (not a
     /// function module).
@@ -863,13 +852,13 @@ mod tests {
     #[test]
     fn set_mask_rejects_patterns_above_7() {
         let mut matrix = QrMatrix::new(1, ErrorCorrectionLevel::M);
-        assert_eq!(matrix.set_mask(MaskSetting::Exact(8)), Err(MaskError::InvalidMaskVersion(8)));
+        assert_eq!(matrix.set_mask(MaskSetting::Exact(8)), Err(ApplyMaskError::InvalidMaskVersion(8)));
         assert_eq!(matrix.mask(), None, "a rejected pattern must not become the matrix's mask");
     }
 
     #[test]
     fn with_mask_rejects_patterns_above_7() {
         let matrix = QrMatrix::new(1, ErrorCorrectionLevel::M);
-        assert_eq!(matrix.with_mask(9), Err(MaskError::InvalidMaskVersion(9)));
+        assert_eq!(matrix.with_mask(9), Err(ApplyMaskError::InvalidMaskVersion(9)));
     }
 }
