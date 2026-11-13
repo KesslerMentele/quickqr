@@ -30,6 +30,10 @@ impl<'a> BitReader<'a> {
     }
 
     /// Reads `length` bits as a big-endian integer.
+    ///
+    /// # Errors
+    ///
+    /// If the length value is greater than the count of remaining bits.
     fn read(&mut self, length: usize) -> Result<u32, DecodeDataError> {
         if self.remaining() < length {
             return Err(DecodeDataError::UnexpectedEnd);
@@ -48,8 +52,12 @@ impl<'a> Display for BitReader<'a> {
     }
 }
 
-/// Inverse of `encode_numeric`: a count, then digits in groups of three (10 bits), with a
-/// trailing group of two (7 bits) or one (4 bits).
+/// Inverse of [`encode_numeric`](quickqr::encoder::encode_numeric).
+/// A count, then digits in groups of three (10 bits), with a trailing group of two (7 bits) or one (4 bits).
+///
+/// # Errors
+///
+/// If the [`BitReader`](BitReader) reaches an [`Unexpected End`](DecodeDataError::UnexpectedEnd).
 fn decode_numeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let mut remaining = reader.read(group.char_count_bits(SegmentMode::Numeric))? as usize;
     while remaining >= 3 {
@@ -65,8 +73,14 @@ fn decode_numeric(reader: &mut BitReader, group: VersionGroup, output: &mut Stri
     Ok(())
 }
 
-/// Inverse of `encode_alphanumeric`: a count, then characters in pairs (11 bits, `first * 45 +
+/// Inverse of [`encode_alphanumeric`](quickqr::encoder::encode_alphanumeric): a count, then characters in pairs (11 bits, `first * 45 +
 /// second`), with a trailing single character (6 bits).
+///
+/// # Errors
+///
+/// If the [`BitReader`](BitReader) reaches an [`Unexpected End`](DecodeDataError::UnexpectedEnd).
+///
+/// If any of the values cannot be decoded into a valid alphanumeric character
 fn decode_alphanumeric(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let mut remaining = reader.read(group.char_count_bits(SegmentMode::Alphanumeric))? as usize;
     while remaining >= 2 {
@@ -83,8 +97,13 @@ fn decode_alphanumeric(reader: &mut BitReader, group: VersionGroup, output: &mut
     Ok(())
 }
 
-/// Inverse of `encode_byte`: a byte count, then that many raw bytes, interpreted as UTF-8 (every
-/// Byte segment's range sits on char boundaries, so this is always a complete, valid string).
+/// Inverse of [`encode_byte`](quickqr::encoder::encode_byte): a byte count, then that many raw bytes, interpreted as UTF-8.
+///
+/// # Errors
+///
+/// If the [`BitReader`](BitReader) reaches an [`Unexpected End`](DecodeDataError::UnexpectedEnd).
+///
+/// If any of the values cannot be decoded into a valid UTF-8 character.
 fn decode_byte(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let count = reader.read(group.char_count_bits(SegmentMode::Byte))? as usize;
     let mut bytes = Vec::with_capacity(count);
@@ -95,8 +114,12 @@ fn decode_byte(reader: &mut BitReader, group: VersionGroup, output: &mut String)
     Ok(())
 }
 
-/// Reverses `encode_kanji`'s transform on a single 13-bit value: back to the reduced Shift-JIS
-/// offset, then the code point, then the char it decodes to.
+/// Reverses [ `encode_kanji`](quickqr::encoder::encode_kanji)'s transform on a single 13-bit value to the reduced Shift-JIS
+/// offset, then code point, then the char it decodes to.
+///
+/// # Errors
+///
+/// If any value cannot be converted into a valid kanji code point.
 #[cfg(feature = "kanji")]
 fn decode_kanji_char(value: u16) -> Result<char, DecodeDataError> {
     let reduced = (value / 0xC0) * 0x100 + value % 0xC0;
@@ -111,7 +134,13 @@ fn decode_kanji_char(value: u16) -> Result<char, DecodeDataError> {
     }
 }
 
-/// Inverse of `encode_kanji`: a count, then that many 13-bit values.
+/// Inverse of [ `encode_kanji`](quickqr::encoder::encode_kanji): a count, then that many 13-bit values.
+///
+/// /// # Errors
+///
+/// If the [`BitReader`](BitReader) reaches an [`Unexpected End`](DecodeDataError::UnexpectedEnd).
+///
+/// If any of the values cannot be decoded into a valid kanji code point.
 #[cfg(feature = "kanji")]
 fn decode_kanji(reader: &mut BitReader, group: VersionGroup, output: &mut String) -> Result<(), DecodeDataError> {
     let count = reader.read(group.char_count_bits(SegmentMode::Kanji))? as usize;
@@ -122,6 +151,10 @@ fn decode_kanji(reader: &mut BitReader, group: VersionGroup, output: &mut String
 }
 
 /// The version whose symbol has exactly `module_count` modules, and that symbol's width.
+///
+/// # Errors
+///
+/// If there is no version that produces the given module count.
 fn version_and_size(module_count: usize) -> Result<(u8, usize), DecodeDataError> {
     (1..=40u8)
         .map(|version| (version, version as usize * 4 + 17))
@@ -132,6 +165,10 @@ fn version_and_size(module_count: usize) -> Result<(u8, usize), DecodeDataError>
 /// Reads the error correction level and mask pattern from the format information. Picks the valid
 /// codeword closest to either copy, and gives up if even that is more than 3 bits away: the
 /// furthest BCH(15,5), with its minimum distance of 7, can reliably correct.
+///
+/// # Errors
+///
+/// If the format information is unreadable.
 fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<(ErrorCorrectionLevel, u8), DecodeDataError> {
     let read_copy = |copy: usize| {
         (0..15).fold(0u32, |word, i| {
@@ -157,6 +194,14 @@ fn read_format_information(modules: &BitSlice<u8, Lsb0>, size: usize) -> Result<
 }
 
 /// Decodes a symbol's modules, row-major with `true` for dark, back into the original string.
+///
+/// # Errors
+///
+/// If there is no version that gives the provided module count.
+///
+/// If the format information is unreadable.
+///
+/// If the data is uncorrectable.
 pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, DecodeDataError> {
     let (version, size) = version_and_size(modules.len())?;
     let (level, mask) = read_format_information(modules, size)?;
@@ -187,9 +232,12 @@ pub(crate) fn decode_modules(modules: &BitSlice<u8, Lsb0>) -> Result<String, Dec
     decode_segments(&data_codewords, version)
 }
 
-/// Decodes `data_codewords` that have already been stripped of ec, terminator and padding
-/// back into the original string. Stops at the terminator (a `0000` mode indicator) or once
-/// fewer than 4 bits remain, whichever comes first.
+/// Decodes `data_codewords` that have already been stripped of error correction, terminator and padding
+/// back into the original string.
+///
+/// # Errors
+///
+/// If an unsupported mode is encountered.
 pub(crate) fn decode_segments(data_codewords: &[u8], version: u8) -> Result<String, DecodeDataError> {
     let bits = bytes_to_bits(data_codewords);
     let group = VersionGroup::of(version);
@@ -215,11 +263,11 @@ mod tests {
     use crate::bits::write_bits;
     use crate::capacity::data_codewords;
     use super::*;
-    use crate::qr_code::{create_qr_code, EncodingMode, MaskSetting, QrData, QrVersion};
+    use crate::qr_code::{QrCode, EncodingMode, MaskSetting, QrConfiguration, QrVersion};
 
     /// What a reader would hand over for `data` at 1-M under `mask`: bits and nothing else.
     fn scanned(data: &str, mask: u8) -> BitVec<u8, Lsb0> {
-        let matrix = create_qr_code(&QrData { text: data.parse().unwrap(), error_correction_level: ErrorCorrectionLevel::M, encoding_mode: EncodingMode::Auto, version: QrVersion::Auto, mask: MaskSetting::Exact(mask)}).unwrap().matrix;
+        let matrix = QrCode::with_config(&QrConfiguration { text: data.parse().unwrap(), error_correction_level: ErrorCorrectionLevel::M, encoding_mode: EncodingMode::Auto, version: QrVersion::Auto, mask: MaskSetting::Exact(mask)}).unwrap().matrix;
         matrix.modules().to_bitvec()
     }
 
@@ -240,7 +288,7 @@ mod tests {
     fn decode_modules_reads_every_level_from_the_format_information() {
         use ErrorCorrectionLevel::*;
         for level in [L, M, Q, H] {
-            let matrix = create_qr_code(&QrData { text: "HELLO".into(), error_correction_level:level, mask: MaskSetting::Auto, version: QrVersion::Auto, encoding_mode: EncodingMode::Auto }).unwrap().matrix;
+            let matrix = QrCode::with_config(&QrConfiguration { text: "HELLO".into(), error_correction_level:level, mask: MaskSetting::Auto, version: QrVersion::Auto, encoding_mode: EncodingMode::Auto }).unwrap().matrix;
             let (read_level, _) = read_format_information(matrix.modules(), matrix.size()).unwrap();
             assert_eq!(read_level, level);
             assert_eq!(decode_modules(matrix.modules()), Ok("HELLO".to_string()));
@@ -257,7 +305,7 @@ mod tests {
                     .map(|i| char::from(b'!' + (i % 90) as u8))
                     .collect();
                 let mask = MaskSetting::Exact(version % 8);
-                let matrix = create_qr_code(&QrData { text: original.clone(), error_correction_level:level, encoding_mode: EncodingMode::Byte, version: QrVersion::Exact(version), mask}).unwrap().matrix;
+                let matrix = QrCode::with_config(&QrConfiguration { text: original.clone(), error_correction_level:level, encoding_mode: EncodingMode::Byte, version: QrVersion::Exact(version), mask}).unwrap().matrix;
                 assert_eq!(decode_modules(matrix.modules()).as_ref(), Ok(&original), "version {version} at {level:?}");
             }
         }

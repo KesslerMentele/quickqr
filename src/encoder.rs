@@ -1,24 +1,4 @@
-// inputs:
-//  - &str to encode
-//  - EC_MODE to use ( 0 - 3 )
-//  - the version number ( 1-40 )
-//
-// Create Data Bits:
-//  - determine the correct encoding mode for input str.
-//  - write the first 4 bit type code of the encoding mode into a bitvec.
-//  - write the character count bit length into the bitvec.
-//  - write the encoded data into the bitvec.
-//  - round off the bitvec with 0s to the nearest byte.
-//  - pad the remaining space of the code with alternating [236, 17] bytes.
-//
-// Encode Data Bits:
-//  - Generate Error correction bits.
-//  - Interleave data and return a bitvec of interleaved EC and data blocks
-
-use core::fmt;
 use bitvec::prelude::*;
-#[cfg(feature = "kanji")]
-use encoding_rs::{EncoderResult, SHIFT_JIS};
 use crate::bits::write_bits;
 use crate::capacity;
 pub(crate) use crate::errors::{CreateQrError, EncodeDataError};
@@ -26,8 +6,15 @@ use crate::gf_math::{error_correction_codewords, EcLength};
 use crate::qr_code::{EncodedData, EncodingMode, ErrorCorrectionLevel, QrVersion, SegmentStats};
 use crate::segmenter::{choose_version, SegmentMode, SegmentPlan, VersionGroup};
 
+#[cfg(feature = "kanji")]
+use encoding_rs::{EncoderResult, SHIFT_JIS};
+
 /// Encodes `data` (ASCII digits only) as QR Numeric mode data bits: digits are grouped by
 /// three, each group packed as 10 bits, except a trailing group of two (7 bits) or one (4 bits).
+///
+/// # Errors
+///
+/// If an invalid character is encountered.
 fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let digits = data
         .chars()
@@ -43,7 +30,7 @@ fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
             1 => 4,
             _ => unreachable!("chunks(3) never yields an empty or larger-than-3 group"),
         };
-        write_bits(&mut bits, value, bit_length);
+        write_bits(&mut bits, value, bit_length)?;
     }
     Ok(bits)
 }
@@ -51,6 +38,10 @@ fn encode_numeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
 /// Encodes `data` (QR's 45-character alphanumeric set) as QR Alphanumeric mode data bits:
 /// characters are grouped in pairs, each pair packed as `first * 45 + second` in 11 bits,
 /// except a trailing single character (6 bits).
+///
+/// # Errors
+///
+/// If an invalid character is encountered.
 fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let values = data
         .chars()
@@ -60,8 +51,8 @@ fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> 
     let mut bits = BitVec::new();
     for pair in values.chunks(2) {
         match pair {
-            &[first, second] => write_bits(&mut bits, first as u32 * 45 + second as u32, 11),
-            &[single] => write_bits(&mut bits, single as u32, 6),
+            &[first, second] => write_bits(&mut bits, first as u32 * 45 + second as u32, 11)?,
+            &[single] => write_bits(&mut bits, single as u32, 6)?,
             _ => unreachable!("chunks(2) never yields an empty or larger-than-2 group"),
         }
     }
@@ -70,6 +61,10 @@ fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> 
 
 /// Maps a character to its double-byte Shift-JIS code point, if it has one in either of the two
 /// ranges QR Kanji mode can represent (0x8140..=0x9FFC, 0xE040..=0xEBBF).
+///
+/// # Errors
+///
+/// If an invalid character is encountered.
 #[cfg(feature = "kanji")]
 pub(crate) fn shift_jis_kanji(c: char) -> Result<u16, EncodeDataError> {
     let mut utf8 = [0u8; 4];
@@ -95,13 +90,17 @@ pub(crate) fn shift_jis_kanji(c: char) -> Result<u16, EncodeDataError> {
 fn encode_byte(data: &str) -> BitVec<u8, Lsb0> {
     let mut bits = BitVec::with_capacity(data.len() * 8);
     for &byte in data.as_bytes() {
-        write_bits(&mut bits, byte as u32, 8);
+        write_bits(&mut bits, byte as u32, 8).expect("It is impossible to error here, as a u8 can always fit into 8 bits by definition.");
     }
     bits
 }
 
 /// Encodes `data` as QR Kanji mode data bits: each char is transcoded to its two-byte Shift-JIS
 /// code point, reduced into its QR subset range and packed into 13 bits.
+///
+/// # Errors
+///
+/// If an invalid character is encountered.
 #[cfg(feature = "kanji")]
 fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let mut bits = BitVec::new();
@@ -113,7 +112,7 @@ fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
             code_point - 0xC140
         };
         let value = (reduced >> 8) * 0xC0 + (reduced & 0xFF);
-        write_bits(&mut bits, value as u32, 13);
+        write_bits(&mut bits, value as u32, 13).expect("It is impossible to error here");
     }
     Ok(bits)
 }
@@ -121,6 +120,10 @@ fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
 /// Encodes an ECI assignment number as QR ECI mode data bits, using the UTF-8-like
 /// variable-length prefix scheme the spec defines: 1 byte for 0..=127, 2 bytes for
 /// 128..=16383, 3 bytes for 16384..=999999.
+///
+/// # Errors
+///
+/// If the ECI designator is out of range.
 fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let mut bits = BitVec::new();
     match designator {
@@ -141,14 +144,14 @@ fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     Ok(bits)
 }
 
-/// Encodes FNC1-in-first-position. It carries no data of its own beyond its mode indicator
-/// (written by the caller), so there are no data bits to append.
+/// Encodes FNC1-in-first-position. It carries no data of its own beyond its mode indicator so there
+/// are no data bits to append.
 fn encode_fnc1_first_position() -> BitVec<u8, Lsb0> {
     BitVec::new()
 }
 
-/// Encodes FNC1-in-second-position's Application Indicator as QR data bits. Resolving an
-/// AI (a digit or letter, per AIM spec) to its 8-bit value is the caller's responsibility.
+/// Encodes FNC1-in-second-position's Application Indicator as QR data bits. Resolving an AI to its
+/// 8-bit value is the caller's responsibility.
 fn encode_fnc1_second_position(application_indicator: u8) -> BitVec<u8, Lsb0> {
     let mut bits = BitVec::new();
     write_bits(&mut bits, application_indicator as u32, 8);
@@ -182,11 +185,11 @@ fn write_segment_header(bits: &mut BitVec<u8, Lsb0>, mode: SegmentMode, text: &s
         SegmentMode::Byte => text.len(),
         _ => text.chars().count(),
     };
-    write_bits(bits, indicator, 4);
-    write_bits(bits, count as u32, group.char_count_bits(mode));
+    write_bits(bits, indicator, 4).expect("It is impossible to error here");
+    write_bits(bits, count as u32, group.char_count_bits(mode)).expect("It is impossible to error here");
 }
 
-/// Appends a segment's header and data bits to `bits`, returning where they landed.
+/// Appends a segment's header and data bits to `bits`, returning where they landed as a [`SegmentStats`].
 fn append_segment(
     bits: &mut BitVec<u8, Lsb0>,
     mode: SegmentMode,
@@ -241,6 +244,12 @@ pub(crate) fn alphanumeric_char(value: u8) -> Option<char> {
 
 /// Encodes every segment of `plan` as a header followed by its data bits, back to back with no
 /// byte alignment between segments.
+///
+/// # Errors
+///
+/// If a segment's [`SegmentMode`] is not a valid and enabled [`EncodingMode`].
+///
+/// If the segment cannot be encoded with the determined [`EncodingMode`].
 pub(crate) fn encode_data_by_encoding_plan(data:&str, plan: SegmentPlan) -> Result<EncodedData, CreateQrError> {
     let group = VersionGroup::of(plan.version);
     let mut bits = BitVec::with_capacity(plan.data_bits_length);
@@ -255,6 +264,12 @@ pub(crate) fn encode_data_by_encoding_plan(data:&str, plan: SegmentPlan) -> Resu
 
 /// Encodes all of `data` as one segment in `mode`, header included, in the version chosen per
 /// `choice`. Fails if `data` has a char `mode` can't encode, or doesn't fit the version.
+///
+/// # Errors
+///
+/// If a segment's [`SegmentMode`] is not a valid and enabled [`EncodingMode`].
+///
+/// If the segment cannot be encoded with the determined [`EncodingMode`].
 pub(crate) fn encode_single_segment(
     data: &str,
     mode: SegmentMode,
@@ -271,24 +286,25 @@ pub(crate) fn encode_single_segment(
     Ok(EncodedData { version, bits, segments: vec![segment] })
 }
 
-/// Fills out `bits` to exactly the data codewords `version` holds at `error_correction_level`:
-/// a terminator of up to four zero bits (fewer if capacity runs out first), zero bits to the next
-/// byte boundary, then alternating 0xEC, 0x11 pad codewords. Returns the data codewords.
+/// Fills out `bits` the data codewords that the provided `version` holds at [`ErrorCorrectionLevel`]:
+/// a terminator of up to four zero bits, zero bits to the next byte boundary,
+/// then alternating 0xEC, 0x11 pad codewords.
 ///
-/// Panics if `bits` is already longer than the data codewords; segmenting checks capacity first.
+/// Returns the data codewords.
+///
+/// # Errors
+///
+/// If `bits` is longer than the data codewords bit capacity.
 pub(crate) fn apply_formatting(
     mut bits: BitVec<u8, Lsb0>,
     version: u8,
     error_correction_level: ErrorCorrectionLevel,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, EncodeDataError> {
     let data_codewords = capacity::data_codewords(version, error_correction_level);
     let capacity_bits = data_codewords * 8;
-    assert!(
-        bits.len() <= capacity_bits,
-        "{} bits don't fit in {} data codewords",
-        bits.len(),
-        data_codewords
-    );
+    if bits.len() > capacity_bits {
+        return Err(EncodeDataError::BitsWouldOverflow(bits.len() as u32, capacity_bits));
+    }
 
     let terminator_length = (capacity_bits - bits.len()).min(4);
     bits.resize(bits.len() + terminator_length, false);
@@ -301,25 +317,27 @@ pub(crate) fn apply_formatting(
         .collect();
     let pad_length = data_codewords - codewords.len();
     codewords.extend([0xEC, 0x11].into_iter().cycle().take(pad_length));
-    codewords
+    Ok(codewords)
 }
 
-/// Splits `data_codewords` into `version`'s error correction blocks, computes each block's error
-/// correction codewords, and interleaves them into the final bitstream: the first data codeword
-/// of every block, then the second, and so on, followed by the error correction codewords in the
-/// same pattern. Ready for `QRMatrix::place_data`.
+/// Splits `data_codewords` into the provided `version`'s count of error correction blocks,
+/// computes each block's error correction codewords and interleaves them into the final bitstream.
+/// Ready for `QRMatrix::place_data`.
 ///
-/// Panics if `data_codewords` isn't exactly the data codeword count `apply_formatting` produces.
+/// # Errors
+///
+/// If `data_codewords` isn't exactly the data codeword count `apply_formatting` produces.
 pub(crate) fn apply_error_correction(
     data_codewords: &[u8],
     version: u8,
     error_correction_level: ErrorCorrectionLevel,
-) -> BitVec<u8, Lsb0> {
-    assert_eq!(
-        data_codewords.len(),
-        capacity::data_codewords(version, error_correction_level),
-        "data codewords must fill the version exactly"
-    );
+) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
+    let codeword_count = data_codewords.len();
+    let codeword_capacity = capacity::data_codewords(version, error_correction_level);
+    if codeword_count != codeword_capacity  {
+        return Err(EncodeDataError::InvalidByteCount(codeword_count, codeword_capacity));
+    }
+
     let block_count = capacity::error_correction_blocks(version, error_correction_level);
     let ec_per_block = capacity::ecc_codewords_per_block(version, error_correction_level);
     let ec_length = EcLength::try_from(ec_per_block as u8)
@@ -327,8 +345,8 @@ pub(crate) fn apply_error_correction(
 
     // Blocks share the data as evenly as possible; the short ones come first, and the last
     // `data_codewords.len() % block_count` blocks each hold one extra codeword.
-    let short_length = data_codewords.len() / block_count;
-    let short_blocks = block_count - data_codewords.len() % block_count;
+    let short_length = codeword_count / block_count;
+    let short_blocks = block_count - codeword_count % block_count;
     let mut blocks = Vec::with_capacity(block_count);
     let mut rest = data_codewords;
     for i in 0..block_count {
@@ -355,9 +373,16 @@ pub(crate) fn apply_error_correction(
             write_bits(&mut bits, ec_block[i] as u32, 8);
         }
     }
-    bits
+    Ok(bits)
 }
 
+/// Takes some str `data` and returns a [BitVec] containing the encoded value using the requested [EncodingMode]
+///
+/// # Errors
+///
+/// If the requested [EncodingMode] is unable to encode `data`.
+///
+/// If The requested [EncodingMode] is invalid.
 pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     match mode {
         EncodingMode::Numeric => {
@@ -581,7 +606,7 @@ mod tests {
 
     #[test]
     fn formatting_matches_the_iso_18004_example() {
-        let codewords = apply_formatting(iso_example_bits(), 1, ErrorCorrectionLevel::M);
+        let codewords = apply_formatting(iso_example_bits(), 1, ErrorCorrectionLevel::M).unwrap();
         assert_eq!(
             codewords,
             [0x10, 0x20, 0x0C, 0x56, 0x61, 0x80, 0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11]
@@ -591,7 +616,7 @@ mod tests {
     #[test]
     fn formatting_empty_data_is_a_terminator_then_padding() {
         // 1-L holds 19 data codewords: one zero byte (terminator + alignment), then 18 pads.
-        let codewords = apply_formatting(BitVec::new(), 1, ErrorCorrectionLevel::L);
+        let codewords = apply_formatting(BitVec::new(), 1, ErrorCorrectionLevel::L).unwrap();
         let mut expected = vec![0x00];
         expected.extend([0xEC, 0x11].into_iter().cycle().take(18));
         assert_eq!(codewords, expected);
@@ -600,13 +625,13 @@ mod tests {
     #[test]
     fn formatting_shortens_the_terminator_when_capacity_runs_out() {
         // 1-H holds 72 bits; 70 data bits leave room for only 2 terminator bits and no padding.
-        let codewords = apply_formatting(bitvec![u8, Lsb0; 1; 70], 1, ErrorCorrectionLevel::H);
+        let codewords = apply_formatting(bitvec![u8, Lsb0; 1; 70], 1, ErrorCorrectionLevel::H).unwrap();
         assert_eq!(codewords, [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC]);
     }
 
     #[test]
     fn formatting_adds_nothing_to_data_that_fills_capacity() {
-        let codewords = apply_formatting(bitvec![u8, Lsb0; 1; 72], 1, ErrorCorrectionLevel::H);
+        let codewords = apply_formatting(bitvec![u8, Lsb0; 1; 72], 1, ErrorCorrectionLevel::H).unwrap();
         assert_eq!(codewords, [0xFF; 9]);
     }
 
@@ -618,8 +643,8 @@ mod tests {
 
     #[test]
     fn error_correction_matches_the_iso_18004_example() {
-        let codewords = apply_formatting(iso_example_bits(), 1, ErrorCorrectionLevel::M);
-        let bits = apply_error_correction(&codewords, 1, ErrorCorrectionLevel::M);
+        let codewords = apply_formatting(iso_example_bits(), 1, ErrorCorrectionLevel::M).unwrap();
+        let bits = apply_error_correction(&codewords, 1, ErrorCorrectionLevel::M).unwrap();
         let mut expected = codewords.clone();
         expected.extend([0xA5, 0x24, 0xD4, 0xC1, 0xED, 0x36, 0xC7, 0x87, 0x2C, 0x55]);
         assert_eq!(to_bytes(&bits), expected);
@@ -629,7 +654,7 @@ mod tests {
     fn error_correction_matches_hello_world_at_1_q() {
         // thonky.com's QR tutorial worked example.
         let data = [32, 91, 11, 120, 209, 114, 220, 77, 67, 64, 236, 17, 236];
-        let bits = apply_error_correction(&data, 1, ErrorCorrectionLevel::Q);
+        let bits = apply_error_correction(&data, 1, ErrorCorrectionLevel::Q).unwrap();
         let mut expected = data.to_vec();
         expected.extend([168, 72, 22, 82, 217, 54, 156, 0, 46, 15, 180, 122, 16]);
         assert_eq!(to_bytes(&bits), expected);
@@ -639,7 +664,7 @@ mod tests {
     fn error_correction_interleaves_blocks_of_two_lengths() {
         // 5-Q: two blocks of 15 data codewords, then two of 16; 18 EC codewords each.
         let data: Vec<u8> = (0..62).collect();
-        let bytes = to_bytes(&apply_error_correction(&data, 5, ErrorCorrectionLevel::Q));
+        let bytes = to_bytes(&apply_error_correction(&data, 5, ErrorCorrectionLevel::Q).unwrap());
         assert_eq!(bytes.len(), capacity::total_codewords(5));
 
         let mut expected_data: Vec<u8> = (0..15).flat_map(|i| [i, 15 + i, 30 + i, 46 + i]).collect();
@@ -657,17 +682,19 @@ mod tests {
     fn error_correction_fills_every_codeword_of_every_version() {
         for version in 1..=40u8 {
             for level in [ErrorCorrectionLevel::L, ErrorCorrectionLevel::M, ErrorCorrectionLevel::Q, ErrorCorrectionLevel::H] {
-                let codewords = apply_formatting(BitVec::new(), version, level);
-                let bits = apply_error_correction(&codewords, version, level);
+                let codewords = apply_formatting(BitVec::new(), version, level).unwrap();
+                let bits = apply_error_correction(&codewords, version, level).unwrap();
                 assert_eq!(bits.len(), capacity::total_codewords(version) * 8, "version {version} {level:?}");
             }
         }
     }
 
     #[test]
-    #[should_panic(expected = "data codewords must fill the version exactly")]
     fn error_correction_rejects_unformatted_data() {
-        apply_error_correction(&[0x10, 0x20], 1, ErrorCorrectionLevel::M);
+        assert_eq!(
+            apply_error_correction(&[0x10, 0x20], 1, ErrorCorrectionLevel::M).unwrap_err(),
+            EncodeDataError::InvalidByteCount(2, 16)
+        );
     }
 
     #[test]

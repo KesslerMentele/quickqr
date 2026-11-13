@@ -67,8 +67,7 @@ const ALIGNMENT_PATTERN_COORDINATES: [&[u8]; 40] = [
     &[6, 30, 58, 86, 114, 142, 170],
 ];
 
-/// A square grid of modules, stored row-major (the layout `penalty_score` expects), alongside
-/// which of those modules belong to a function pattern.
+/// A grid of modules representing a QR Code, stored row-major.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrMatrix {
@@ -696,8 +695,8 @@ mod tests {
 
     #[test]
     fn place_data_accepts_create_qr_code_bits_output() {
-        use crate::qr_code::{create_qr_code_bits, EncodingMode, ErrorCorrectionLevel, MaskSetting, QrData, QrVersion};
-        let bits = create_qr_code_bits(&QrData::from_parts("01234567", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Exact(1), MaskSetting::Auto)).unwrap().bits;
+        use crate::qr_code::{create_qr_code_bits, EncodingMode, ErrorCorrectionLevel, MaskSetting, QrConfiguration, QrVersion};
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("01234567", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Exact(1), MaskSetting::Auto)).unwrap().bits;
         let mut matrix = QrMatrix::new(1, ErrorCorrectionLevel::M);
         matrix.place_data(&bits);
         // Mode indicator 0001: the first three modules light, the fourth dark.

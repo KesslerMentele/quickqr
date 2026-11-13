@@ -1,15 +1,27 @@
 use bitvec::prelude::*;
+use crate::EncodeDataError;
 
-/// Appends the low `bit_length` bits of `value` (most-significant bit first, as the QR spec
-/// requires) onto `bits`.
+/// Appends the low `bit_length` bits of `value` onto `bits`.
 /// `value` must already fit in `bit_length` bits.
-pub(crate) fn write_bits(bits: &mut BitVec<u8, Lsb0>, value: u32, bit_length: usize) {
-    debug_assert!((1..=32).contains(&bit_length), "bit_length must be in 1..=32");
+///
+/// # Errors
+///
+/// If the provided value does not fit in the provided bit_length.
+///
+/// If the provided bit length is invalid.
+pub(crate) fn write_bits(bits: &mut BitVec<u8, Lsb0>, value: u32, bit_length: usize) -> Result<(), EncodeDataError > {
     debug_assert!(
         bit_length == 32 || value < (1u32 << bit_length),
         "value {value} does not fit in {bit_length} bits"
     );
+    if 1 > bit_length || bit_length > 32 {
+        return Err(EncodeDataError::InvalidBitLength(bit_length))
+    }
+    if bit_length > 32 ||  value >= (1u32 << bit_length) {
+        return Err(EncodeDataError::BitsWouldOverflow(value, bit_length));
+    }
     bits.extend((0..bit_length).rev().map(|i| (value >> i) & 1 == 1));
+    Ok(())
 }
 
 /// Packs a byte-aligned, MSB-first-per-byte bitstream into bytes.
@@ -22,7 +34,7 @@ pub(crate) fn bits_to_bytes(bits: &BitSlice<u8, Lsb0>) -> Vec<u8> {
 pub(crate) fn bytes_to_bits(bytes: &[u8]) -> BitVec<u8, Lsb0> {
     let mut bits = BitVec::with_capacity(bytes.len() * 8);
     for &byte in bytes {
-        write_bits(&mut bits, byte as u32, 8);
+        write_bits(&mut bits, byte as u32, 8).expect("u8 did not fit in 8 bits...");
     }
     bits
 }
@@ -34,23 +46,23 @@ mod tests {
     #[test]
     fn write_bits_appends_low_bits_msb_first() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 0b101, 3);
+        write_bits(&mut bits, 0b101, 3).unwrap();
         assert_eq!(bits, bits![1, 0, 1]);
     }
 
     #[test]
     fn write_bits_pads_to_the_requested_length() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 1, 4);
+        write_bits(&mut bits, 1, 4).unwrap();
         assert_eq!(bits, bits![0, 0, 0, 1]);
     }
 
     #[test]
     fn write_bits_accumulates_across_calls() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 0b11, 2);
-        write_bits(&mut bits, 0b0, 1);
-        write_bits(&mut bits, 0b101, 3);
+        write_bits(&mut bits, 0b11, 2).unwrap();
+        write_bits(&mut bits, 0b0, 1).unwrap();
+        write_bits(&mut bits, 0b101, 3).unwrap();
         assert_eq!(bits, bits![1, 1, 0, 1, 0, 1]);
     }
 
@@ -58,7 +70,7 @@ mod tests {
     #[should_panic]
     fn write_bits_rejects_a_value_that_does_not_fit() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 0b1000, 3);
+        write_bits(&mut bits, 0b1000, 3).unwrap();
     }
 
     #[test]

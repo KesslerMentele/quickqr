@@ -19,7 +19,7 @@ prelude = "0.2.1"
 
 
 [features]
-serde = ["dep:serde","bitvec/serde"]
+serde = ["dep:serde","bitvec/serde", "serde/rc"]
 kanji = ["dep:encoding_rs"]
 
 [dev-dependencies]

@@ -18,7 +18,7 @@ pub(crate) struct EcBlockInfo {
 }
 
 impl fmt::Display for EcBlockInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "total_data_codewords: {}, ec_codewords_per_block: {}, group_1_blocks: {}, group_1_data_codewords: {}, group_2_blocks: {}, group_2_data_codewords: {}",
                self.total_data_codewords,
                self.ec_codewords_per_block,
@@ -105,8 +105,7 @@ const EC_TABLE: [[(u16, u16, u16, u16, u16, u16); 4]; 40] = [
 ];
 
 /// Modules left for data and error correction once the finder, separator, timing and alignment
-/// patterns, the format information and (from version 7) the version information are removed.
-/// Not always a multiple of 8: the 0, 3, 4 or 7 leftover remainder bits hold no codeword.
+/// patterns, the format information and version information are removed.
 pub(crate) fn raw_data_modules(v: usize) -> usize {
 
     let mut modules = (16 * v + 128) * v + 64;
@@ -125,18 +124,22 @@ pub(crate) fn total_codewords(version: u8) -> usize {
     raw_data_modules(version.into()) / 8
 }
 
+/// Retrieves the error correction codewords per block for a given version and [`ErrorCorrectionLevel`](ErrorCorrectionLevel).
 pub(crate) fn ecc_codewords_per_block(version: u8, level: ErrorCorrectionLevel) -> usize {
     let v:usize = version.into();
     ECC_CODEWORDS_PER_BLOCK[level as usize][v - 1] as usize
 }
 
+/// Retrieves the error correction block count for a given version and [`ErrorCorrectionLevel`](ErrorCorrectionLevel).
 pub(crate) fn error_correction_blocks(version: u8, level: ErrorCorrectionLevel) -> usize {
     let v:usize = version.into();
     ERROR_CORRECTION_BLOCKS[level as usize][v - 1] as usize
 }
 
-/// Retrieves the error correction information for a given version and `ErrorCorrectionLevel`.
-/// Returns an `EcBlockInfo`.
+/// Retrieves the error correction information for a given version and
+/// [`ErrorCorrectionLevel`](ErrorCorrectionLevel).
+///
+/// Returns an [`EcBlockInfo`](EcBlockInfo).
 pub(crate) fn ec_block_info(version: u8, level: ErrorCorrectionLevel) -> EcBlockInfo {
     let v:usize = version.into();
     let (total_data_codewords, ec_codewords_per_block, group_1_blocks, group_1_data_codewords,
@@ -151,10 +154,11 @@ pub(crate) fn ec_block_info(version: u8, level: ErrorCorrectionLevel) -> EcBlock
     }
 }
 
-/// Codewords available for data (segments, terminator and padding) at this version and level.
+/// Codewords available for data including segments, terminator and padding at a given version and
+/// [`ErrorCorrectionLevel`](ErrorCorrectionLevel).
 pub(crate) fn data_codewords(version: u8, level: ErrorCorrectionLevel) -> usize {
-    total_codewords(version)
-        - ecc_codewords_per_block(version, level) * error_correction_blocks(version, level)
+    (total_codewords(version) - ecc_codewords_per_block(version, level))
+        * error_correction_blocks(version, level)
 }
 
 #[cfg(test)]

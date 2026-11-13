@@ -1,6 +1,8 @@
-//! The public-facing surface of `qr_code`: everything a caller needs to build and render a
-//! QR code, without reaching into the encoding internals (segmenting, bit packing, error
-//! correction, masking) that the rest of the module handles.
+//! A QR Code encoder
+//!
+//! This crate provides an encoder for standard QR codes.
+//! Allows for numbers, text, kanji and binary encoding, while providing optimally-packed data
+//! and best-fit version selection.
 
 mod qr_code;
 mod errors;
@@ -23,5 +25,5 @@ pub use {
 
 pub use qr_code::{
     EncodingMode, ErrorCorrectionLevel, MaskSetting,
-    QrCode, QrData, QrStats, QrVersion, SegmentStats,
+    QrCode, QrConfiguration, QrStats, QrVersion, SegmentStats,
 };

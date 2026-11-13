@@ -4,9 +4,7 @@ use crate::capacity::{ec_block_info, EcBlockInfo};
 use crate::gf_math::{error_correction_codewords, EcLength};
 use crate::qr_code::ErrorCorrectionLevel;
 
-/// Slices `data` into its error-correction blocks (group 1's, then group 2's, preserving that
-/// order since interleaving walks blocks in this order), borrowing from `data` rather than
-/// copying it.
+/// Slices `data` into its error-correction blocks.
 fn split_into_blocks(data: &[u8], info: EcBlockInfo) -> Vec<&[u8]> {
     let mut blocks = Vec::with_capacity((info.group_1_blocks + info.group_2_blocks) as usize);
     let mut rest = data;
@@ -24,15 +22,14 @@ fn split_into_blocks(data: &[u8], info: EcBlockInfo) -> Vec<&[u8]> {
 }
 
 
-/// Builds the final, interleaved codeword sequence ready for placement: data codewords
-/// column-wise across blocks, then error correction codewords the same way.
+/// Builds the final, interleaved codeword sequence ready for placement.
 pub(crate) fn interleave(data: &BitSlice<u8, Lsb0>, version: u8, error_correction_level: ErrorCorrectionLevel) -> BitVec<u8, Lsb0> {
     let data = bits_to_bytes(data);
 
     let info = ec_block_info(version, error_correction_level);
     let ec_codewords_per_block = info.ec_codewords_per_block as usize;
     let ec_len = EcLength::try_from(info.ec_codewords_per_block as u8)
-        .expect("ec_codewords_per_block is always a valid EcLength");
+        .expect("ec_codewords_per_block is always a valid EcLength"); // This can never fail
 
     let blocks = split_into_blocks(&data, info);
     let error_correction: Vec<u8> = blocks.iter().flat_map(|block| error_correction_codewords(block, ec_len) ).collect();
@@ -58,8 +55,8 @@ pub(crate) fn interleave(data: &BitSlice<u8, Lsb0>, version: u8, error_correctio
     result
 }
 
-/// The inverse of `interleave`, for a symbol's codewords: one `data ++ error_correction` sequence
-/// per block (group 1's, then group 2's). Ignores any codewords past the last block's.
+/// The inverse of `interleave`, for a symbol's codewords: one `data + error_correction` sequence
+/// per block.
 pub(crate) fn deinterleave(codewords: &[u8], info: EcBlockInfo) -> Vec<Vec<u8>> {
     let data_lengths: Vec<usize> = std::iter::repeat_n(info.group_1_data_codewords as usize, info.group_1_blocks as usize)
         .chain(std::iter::repeat_n(info.group_2_data_codewords as usize, info.group_2_blocks as usize))
