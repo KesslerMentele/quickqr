@@ -1,5 +1,4 @@
 use std::fmt;
-use std::fmt::Formatter;
 use bitvec::prelude::*;
 
 // The grid-area crossover point measured by this crate's `penalty_score` benchmark: below it,
@@ -17,7 +16,7 @@ pub struct MaskEvaluation {
     pub total: usize,
 }
 impl fmt::Display for MaskEvaluation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "horizontal: {}, vertical: {}, squares: {}, finder_pattern: {}, ratio: {}, total: {}", 
                self.horizontal, self.vertical, self.squares, 
                self.finder_pattern, self.ratio, self.total
@@ -25,11 +24,7 @@ impl fmt::Display for MaskEvaluation {
     }
 }
 
-// Flattened to a single pass over the whole (row-major) bit buffer: `row_end` is computed from
-// `i` on the fly, so a run never scans past its own row, without an outer per-row loop.
-//
-// `pub` (rather than private/`pub(crate)`) solely so the criterion benchmarks in benches/
-// can call these sub-scores directly instead of only the combined `penalty_score` entry point.
+/// Calculates the horizontal penalty score for the provided bits.
 fn calculate_horizontal_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> usize {
     let mut total_score = 0;
     let mut i = 0;
@@ -55,10 +50,7 @@ fn calculate_horizontal_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: u
     total_score
 }
 
-// Same flattening as calculate_horizontal_score, but walked in column-major order: `k` maps to
-// row-major index `idx(k)`, and `col_end` bounds a run to its own column. This only removes the
-// nested-loop shape, not the strided memory access — columns are `width` elements apart in
-// row-major storage regardless of how the loop is written.
+/// Calculates the vertical penalty score for the provided bits.
 fn calculate_vertical_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> usize {
     let mut total_score = 0;
     let idx = |k: usize| (k % height) * width + (k / height);
@@ -86,10 +78,7 @@ fn calculate_vertical_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usi
     total_score
 }
 
-// Flattened to a single pass over the top-left corners of every 2x2 square: restricting the
-// range to `(height - 1) * width` keeps every corner's row below the last row, and skipping the
-// last column keeps every corner's column before the last column, so all four flat offsets
-// (`bit_idx`, `+1`, `+width`, `+width+1`) are always in bounds without a bounds-checked `get`.
+/// Calculates the squares penalty score for the provided bits.
 fn calculate_squares_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> usize {
     if height < 2 || width < 2 {
         return 0;
@@ -112,6 +101,7 @@ fn calculate_squares_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usiz
     score
 }
 
+/// Calculated the finder pattern penalty score for the provided bits.
 fn calculate_finder_pattern_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> usize {
     let pattern = bits![1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
     let mut score = 0;
@@ -155,13 +145,17 @@ fn calculate_finder_pattern_score(bits: &BitSlice<u8, Lsb0>, width: usize, heigh
 
     score
 }
-// uses the built-in count_ones fn inside BitSlice to get the ratio. 
+
+/// uses the built-in [`count_ones`](BitSlice::count_ones) fn inside [BitSlice] to get the ratio
+/// penalty score for the provided bits.
 fn calculate_ratio_score(bits: &BitSlice<u8, Lsb0>) -> usize {
     let ones = bits.count_ones();
     let percent = (ones / bits.len()) * 100;
     ((percent.div_ceil(5) * 5).abs_diff(50) / 5).min(((percent / 5) * 5).abs_diff(50) / 5)
 }
 
+/// The single threaded implementation of the penalty score search. Calculates each of the five
+/// sub-scores, and returns a [MaskEvaluation] containing them and their sum.
 fn penalty_score_st(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
     let horizontal_score = calculate_horizontal_score(bits, width, height);
     let vertical_score = calculate_vertical_score(bits, width, height);
@@ -181,9 +175,7 @@ fn penalty_score_st(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> M
     }
 }
 
-/// Same result as `penalty_score`, but runs each of the five sub-scores on its own thread.
-/// `thread::scope` lets every thread borrow `bits` directly — no `Arc`/`'static` needed — since
-/// the scope guarantees all five finish before this function returns.
+/// Same result as [penalty_score_st], but runs each of the five sub-scores on its own thread.
 fn penalty_score_mt(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
     let (horizontal_score, vertical_score, squares_score, finder_pattern_score, ratio_score) =
         std::thread::scope(|scope| {
@@ -215,8 +207,8 @@ fn penalty_score_mt(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> M
 }
 
 
-/// Picks `penalty_score` or `penalty_score_mt`, whichever benchmarked faster for a grid this
-/// size, instead of committing to one strategy for every grid.
+/// Picks [`penalty_score_st`] or [`penalty_score_mt`], whichever benchmarked faster for a grid
+/// this size.
 pub(crate) fn penalty_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
     if width * height >= MT_THRESHOLD_AREA {
         penalty_score_mt(bits, width, height)

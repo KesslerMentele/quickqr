@@ -1,7 +1,7 @@
 use std::fmt;
 use std::ops::{Add, Div, Mul, Not};
 
-/// Antilog table for GF(256): `EXP_TABLE[i] = alpha^i`, where `alpha = 2` is the field's
+/// Antilog table for GF(256): `EXP_TABLE[i] = α^i`, where `α = 2` is the field's
 /// generator element under the QR code's primitive polynomial (x^8 + x^4 + x^3 + x^2 + 1).
 /// The multiplicative group has order 255, so `EXP_TABLE[255] == EXP_TABLE[0] == 1`.
 const EXP_TABLE: [u8; 256] = [
@@ -20,7 +20,7 @@ const EXP_TABLE: [u8; 256] = [
     131, 27, 54, 108, 216, 173, 71, 142, 1,
 ];
 /// Discrete log table for GF(256), the inverse of `EXP_TABLE`: `LOG_TABLE[x] = i` such that
-/// `alpha^i == x`, for `x` in `1..256`. `LOG_TABLE[0]` has no meaningful value since zero has
+/// `α^i == x`, for `x` in `1..256`. `LOG_TABLE[0]` has no meaningful value since zero has
 /// no discrete logarithm; it's never read for `x == 0` (callers check for that case first).
 const LOG_TABLE: [u8; 256] =[
     0, 255, 1, 25, 2, 50, 26, 198, 3, 223, 51, 238, 27, 104, 199, 75, 4, 100, 224, 14, 52, 141,
@@ -141,7 +141,7 @@ impl Add for Gf256 {
 }
 impl Mul for Gf256 {
     type Output = Self;
-    /// Field multiplication via the log/antilog tables: `a * b = alpha^(log(a) + log(b))`.
+    /// Field multiplication via the log/antilog tables: `a * b = α^(log(a) + log(b))`.
     /// Zero is handled separately since it has no logarithm.
     fn mul(self, rhs: Self) -> Self::Output {
         if self.0 == 0 || rhs.0 == 0 {
@@ -154,7 +154,7 @@ impl Mul for Gf256 {
 }
 impl Not for Gf256 {
     type Output = Self;
-    /// Field multiplicative inverse (`a^-1`), computed as `alpha^(255 - log(a))`.
+    /// Field multiplicative inverse (`a^-1`), computed as `α^(255 - log(a))`.
     fn not(self) -> Self {
         Gf256(EXP_TABLE[255u8.wrapping_sub(LOG_TABLE[self.0 as usize]) as usize])
     }
@@ -271,7 +271,8 @@ impl fmt::Display for Gf256Polynomial {
     }
 }
 
-/// The position and locator of an error in the data, found via Chien Search.
+/// An error found by `chien_search`: the byte position it occurred at within the block, plus
+/// the locator root's reciprocal ("error locator number") needed by `forney_magnitude`.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
 struct LocatedError {
     position: usize,
@@ -296,7 +297,7 @@ fn reed_solomon_remainder(data: Gf256Polynomial, ec_len: EcLength) -> Gf256Polyn
 
     // Synthetic division: cancel the leading term at each degree, walking down from the
     // top (len - 1) to t. Everything below t is what's left over once every degree >= t
-    // has been cancelled - the remainder.
+    // has been canceled.
     for degree in (t..poly.len()).rev() {
         let coef = poly[degree];
         if coef == Gf256::default() {
@@ -312,9 +313,8 @@ fn reed_solomon_remainder(data: Gf256Polynomial, ec_len: EcLength) -> Gf256Polyn
     Gf256Polynomial(poly)
 }
 
-/// Evaluates `received` at each power of alpha used by `ec_len`'s generator polynomial,
-/// producing the syndrome polynomial. All syndromes are zero iff the block decodes as
-/// error-free.
+/// Evaluates `received` at each power of α used by `ec_len`'s generator polynomial, producing the
+/// syndrome polynomial. All syndromes are zero if the block decodes as error-free.
 fn compute_syndromes(received: &Gf256Polynomial, ec_len: EcLength) -> Gf256Polynomial {
     let syndromes = (0..ec_len.value())
         .map(|i| received.evaluate(Gf256::from(EXP_TABLE[i])))
@@ -363,16 +363,13 @@ fn berlekamp_massey(syndromes: Gf256Polynomial) -> Gf256Polynomial {
 
     current_best_locator
 }
-/// Computes the error evaluator polynomial `Omega(x) = (S(x) * Lambda(x)) mod x^n`, used
+/// Computes the error evaluator polynomial `ω(x) = (S(x) * λ(x)) mod x^n`, used
 /// together with the locator's derivative by `forney_magnitude` to recover error magnitudes.
 fn error_evaluator(syndromes: Gf256Polynomial, locator: Gf256Polynomial) -> Gf256Polynomial {
     let n = syndromes.len();
     (syndromes * locator).truncate(n)
 }
-/// An error found by `chien_search`: the byte position it occurred at within the block, plus
-/// the locator root's reciprocal ("error locator number") needed by `forney_magnitude`.
-
-/// Searches for the roots of `locator` among the field elements `alpha^0 .. alpha^(block_length - 1)`
+/// Searches for the roots of `locator` among the field elements `α^0 .. α^(block_length - 1)`
 /// (the Chien search), returning one `LocatedError` per root found.
 fn chien_search(locator: &Gf256Polynomial, block_length: usize) -> Vec<LocatedError> {
     (0..block_length)
@@ -387,7 +384,7 @@ fn chien_search(locator: &Gf256Polynomial, block_length: usize) -> Vec<LocatedEr
         .collect()
 }
 /// Computes the magnitude of the error at a located root via the Forney algorithm:
-/// `locator_number * (omega(root) / derivative(root))`.
+/// `locator_number * (ω(root) / derivative(root))`.
 fn forney_magnitude(omega: Gf256Polynomial, derivative: Gf256Polynomial, locator_number: Gf256, root: Gf256) -> Gf256 {
     locator_number * (omega.evaluate(root) / derivative.evaluate(root))
 }

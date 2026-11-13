@@ -8,14 +8,13 @@ use crate::encoder::{apply_formatting, encode_data_by_encoding_plan, encode_sing
 pub(crate) use crate::errors::{CreateQrError, VersionError};
 use crate::segmenter::{segment, SegmentMode, best_single_mode};
 use crate::structure::QrMatrix;
-// The encoding pipeline. Crate-private: `prelude` re-exports the few types users need, so these
-// modules can change without a breaking release.
+
 
 /// The symbol versions QR codes come in.
 const VERSIONS: RangeInclusive<u8> = 1..=40;
 
-/// With the `serde` feature, serializes as `"Auto"` or the version number, and deserializes from
-/// `"Auto"` (any case), a number, or a numeric string, rejecting numbers outside 1-40.
+/// The version choices that can be used to create a QR code. Either `"Auto"` or a value from 1-40.
+/// Defaults to [QrVersion::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum QrVersion {
     #[default]
@@ -38,7 +37,8 @@ impl TryFrom<u8> for QrVersion {
     }
 }
 
-
+/// The encoding mode choices that can be used to create a QR code.
+/// Defaults to [EncodingMode::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EncodingMode {
@@ -80,6 +80,8 @@ impl fmt::Display for EncodingMode {
     }
 }
 
+/// The error correction level choices that can be used to create a QR code.
+/// Defaults to [ErrorCorrectionLevel::M]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ErrorCorrectionLevel {
@@ -95,8 +97,7 @@ pub enum ErrorCorrectionLevel {
      }
  }
 
-/// Encoded segment bits (headers and data, no terminator or padding yet), and the version they
-/// were sized for.
+/// Encoded segment bits and the version they were sized for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct EncodedData {
     pub(crate) version: u8,
@@ -152,7 +153,7 @@ impl fmt::Display for SegmentStats {
     }
 }
 
-/// Detailed information on the settings of a QR Code.
+/// Detailed information on the settings of a created QR Code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrStats {
@@ -204,10 +205,11 @@ pub struct QrCode {
     stats: QrStats,
 }
 impl QrCode {
-    /// 
+    /// Generates a [QrCode] with the default settings.
     pub fn new(data: String) -> Result<QrCode, CreateQrError> {
         Ok(QrCode::with_config(&QrConfiguration::new(data))?)
     }
+    /// Generates a [QrCode] with the provided settings.
     pub fn with_config(data: &QrConfiguration) -> Result<QrCode, CreateQrError> {
         let encoded_data = create_qr_code_bits(data)?;
         let segments = encoded_data.segments.clone();
@@ -224,7 +226,6 @@ impl QrCode {
         };
         Ok(QrCode { matrix, stats })
     }
-
 
     /// Width and height of the symbol, in modules (21 for version 1, then 4 more per version).
     /// Doesn't include the quiet zone, the light border scanners need around the symbol.
@@ -255,10 +256,11 @@ impl fmt::Display for QrCode {
 }
 
 
-/// The eight mask patterns
+/// The eight mask patterns.
 const MASK_PATTERNS: RangeInclusive<u8> = 0..=7;
 
-/// The mask pattern setting.
+/// The mask pattern setting options for creating a QR code.
+/// Defaults to [MaskSetting::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum MaskSetting {
     #[default]
@@ -302,7 +304,7 @@ impl QrConfiguration {
         }
     }
 
-    /// Every setting at once. For tests, which set most of them.
+    /// Every setting at once.
     #[cfg(test)]
     pub(crate) fn from_parts(text: &str, error_correction_level: ErrorCorrectionLevel, encoding_mode: EncodingMode, version: QrVersion, mask: MaskSetting) -> QrConfiguration {
         QrConfiguration { text: text.into(), error_correction_level, encoding_mode, version, mask }
@@ -336,11 +338,11 @@ impl QrConfiguration {
     ///
     /// # Errors
     ///
-    /// If the text doesn't fit the requested version (or any version in the case of 
+    /// If the text doesn't fit the requested version (or any version in the case of
     /// [`QrVersion::Auto`](QrVersion::Auto)).
-    /// 
-    /// If the data contains characters the requested encoding mode can't represent. 
-    /// 
+    ///
+    /// If the data contains characters the requested encoding mode can't represent.
+    ///
     /// If the requested mode isn't available.
     pub fn build(&self) -> Result<QrCode, CreateQrError> {
         QrCode::with_config(self)
@@ -355,8 +357,7 @@ impl fmt::Display for QrConfiguration {
 }
 
 /// Serde support for settings that are either `Auto` or a number in a fixed range, as
-/// [`QrVersion`] and [`MaskSetting`] are. Hand-written rather than derived so that serializing and
-/// deserializing agree on the format, and so out-of-range numbers are rejected on the way in.
+/// [`QrVersion`] and [`MaskSetting`] are.
 #[cfg(feature = "serde")]
 mod auto_or_number {
     use std::{fmt, ops::RangeInclusive};
@@ -374,9 +375,9 @@ mod auto_or_number {
         }
     }
 
-    /// Accepts `"Auto"` (any case) as `None`, or a number in `range` given as an integer or a
+    /// Accepts `"Auto"`as `None`, or a number in `range` given as an integer or a
     /// numeric string. Uses `deserialize_any`, so it needs a self-describing format (JSON, TOML,
-    /// YAML…), the same as the `untagged` derive it replaces.
+    /// YAML, etc.)
     fn deserialize<'de, D: Deserializer<'de>>(deserializer: D, what: &'static str, range: RangeInclusive<u8>) -> Result<Option<u8>, D::Error> {
         deserializer.deserialize_any(AutoOrNumber { what, range })
     }
@@ -447,6 +448,7 @@ mod auto_or_number {
     }
 }
 
+/// Creates the [EncodedData] with the provided [QrConfiguration].
 pub(crate) fn create_qr_code_bits(
     data: &QrConfiguration
 ) -> Result<EncodedData, CreateQrError> {
@@ -475,6 +477,8 @@ pub(crate) fn create_qr_code_bits(
     encode_single_segment(&*data.text, mode, data.version, data.error_correction_level)
 }
 
+/// Takes [EncodedData] and interleaves it, returning a [BitVec] representing the raw bits to be
+/// placed into the modules.
 fn create_error_corrected_data(encoded_data: EncodedData, error_correction_level:ErrorCorrectionLevel) -> Result<BitVec<u8>, EncodeDataError> {
     let bit_vec = interleave(
         &bytes_to_bits(
@@ -486,7 +490,6 @@ fn create_error_corrected_data(encoded_data: EncodedData, error_correction_level
         encoded_data.version, error_correction_level);
     Ok(bit_vec)
 }
-
 
 
 #[cfg(test)]
