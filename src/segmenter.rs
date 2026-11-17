@@ -53,16 +53,16 @@ impl SegmentMode {
 impl fmt::Display for SegmentMode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &SegmentMode::Numeric => {
+            SegmentMode::Numeric => {
                 write!(f, "numeric")
             }
-            &SegmentMode::Alphanumeric => {
+            SegmentMode::Alphanumeric => {
                 write!(f, "alphanumeric")
             }
-            &SegmentMode::Byte => {
+            SegmentMode::Byte => {
                 write!(f, "byte")
             },
-            &SegmentMode::Kanji => {
+            SegmentMode::Kanji => {
                 write!(f, "kanji")
             }
         }
@@ -91,12 +91,11 @@ impl VersionGroup {
     }
 
     fn versions(self) -> impl Iterator<Item = u8> {
-        let range = match self {
+        match self {
             VersionGroup::Small => 1..=9,
             VersionGroup::Medium => 10..=26,
             VersionGroup::Large => 27..=40,
-        };
-        range
+        }
     }
 
     /// Width of the character count indicator for `mode` in this group, in bits.

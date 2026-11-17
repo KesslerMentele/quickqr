@@ -186,8 +186,7 @@ impl Gf256Polynomial {
 
     /// Multiplies the polynomial by x^m.
     fn shift(self, m: usize) -> Self {
-        let shifted = std::iter::repeat(Gf256::default())
-            .take(m)
+        let shifted = std::iter::repeat_n(Gf256::default(), m)
             .chain(self.0)
             .collect();
         Gf256Polynomial(shifted)

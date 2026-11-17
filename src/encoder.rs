@@ -117,65 +117,6 @@ fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     Ok(bits)
 }
 
-/// Encodes an ECI assignment number as QR ECI mode data bits, using the UTF-8-like
-/// variable-length prefix scheme the spec defines: 1 byte for 0..=127, 2 bytes for
-/// 128..=16383, 3 bytes for 16384..=999999.
-///
-/// # Errors
-///
-/// If the ECI designator is out of range.
-#[cfg_attr(not(test), expect(dead_code, reason = "ECI mode isn't wired into the encoder yet"))]
-fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
-    let mut bits = BitVec::new();
-    match designator {
-        0..=127 => {
-            write_bits(&mut bits, 0, 1)?;
-            write_bits(&mut bits, designator, 7)?;
-        }
-        128..=16_383 => {
-            write_bits(&mut bits, 0b10, 2)?;
-            write_bits(&mut bits, designator, 14)?;
-        }
-        16_384..=999_999 => {
-            write_bits(&mut bits, 0b110, 3)?;
-            write_bits(&mut bits, designator, 21)?;
-        }
-        _ => return Err(EncodeDataError::EciOutOfRange(designator)),
-    }
-    Ok(bits)
-}
-
-/// Encodes FNC1-in-first-position. It carries no data of its own beyond its mode indicator so there
-/// are no data bits to append.
-#[cfg_attr(not(test), expect(dead_code, reason = "FNC1 mode isn't wired into the encoder yet"))]
-fn encode_fnc1_first_position() -> BitVec<u8, Lsb0> {
-    BitVec::new()
-}
-
-/// Encodes FNC1-in-second-position's Application Indicator as QR data bits. Resolving an AI to its
-/// 8-bit value is the caller's responsibility.
-#[cfg_attr(not(test), expect(dead_code, reason = "FNC1 mode isn't wired into the encoder yet"))]
-fn encode_fnc1_second_position(application_indicator: u8) -> BitVec<u8, Lsb0> {
-    let mut bits = BitVec::new();
-    write_bits(&mut bits, application_indicator as u32, 8).expect("a u8 always fits in 8 bits");
-    bits
-}
-
-/// Encodes Structured Append's header fields as QR data bits: a 4-bit sequence number, a
-/// 4-bit total-symbol count (both 0..=15), and an 8-bit parity byte.
-#[cfg_attr(not(test), expect(dead_code, reason = "Structured Append isn't wired into the encoder yet"))]
-fn encode_structured_append(sequence_number: u8, total_symbols: u8, parity: u8, ) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
-    if sequence_number > 15 || total_symbols > 15 {
-        return Err(EncodeDataError::StructuredAppendOutOfRange);
-    }
-
-    let mut bits = BitVec::new();
-    write_bits(&mut bits, sequence_number as u32, 4)?;
-    write_bits(&mut bits, total_symbols as u32, 4)?;
-    write_bits(&mut bits, parity as u32, 8)?;
-    Ok(bits)
-}
-
 /// Writes a segment's header: its 4-bit mode indicator, then its character count in the width
 /// `group` gives `mode`. Byte mode counts UTF-8 bytes; every other mode counts chars.
 fn write_segment_header(bits: &mut BitVec<u8, Lsb0>, mode: SegmentMode, text: &str, group: VersionGroup) {
@@ -466,7 +407,7 @@ mod tests {
     #[test]
     fn byte_packs_every_byte_as_is() {
         assert_eq!(
-            encode_byte(&"ab"),
+            encode_byte("ab"),
             bits![0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0]
         );
     }
@@ -506,51 +447,6 @@ mod tests {
     fn kanji_rejects_a_code_point_outside_either_range() {
         // 纊 only exists in the IBM extension block, at Shift-JIS 0xFA5C.
         assert_eq!(encode_kanji("纊").unwrap_err(), EncodeDataError::KanjiOutOfRange(0xFA5C));
-    }
-
-    #[test]
-    fn eci_one_byte_range_has_a_zero_prefix() {
-        let mut expected = bits![u8, Lsb0; 0].to_bitvec();
-        write_bits(&mut expected, 127, 7).unwrap();
-        assert_eq!(encode_eci(127).unwrap(), expected);
-    }
-
-    #[test]
-    fn eci_two_byte_range_has_a_10_prefix() {
-        let mut expected = bits![u8, Lsb0; 1, 0].to_bitvec();
-        write_bits(&mut expected, 128, 14).unwrap();
-        assert_eq!(encode_eci(128).unwrap(), expected);
-    }
-
-    #[test]
-    fn eci_three_byte_range_has_a_110_prefix() {
-        let mut expected = bits![u8, Lsb0; 1, 1, 0].to_bitvec();
-        write_bits(&mut expected, 16_384, 21).unwrap();
-        assert_eq!(encode_eci(16_384).unwrap(), expected);
-    }
-
-    #[test]
-    fn eci_rejects_a_designator_above_999999() {
-        assert_eq!(encode_eci(1_000_000).unwrap_err(), EncodeDataError::EciOutOfRange(1_000_000));
-    }
-
-    #[test]
-    fn fnc1_first_position_has_no_data_bits() {
-        assert!(encode_fnc1_first_position().is_empty());
-    }
-
-    #[test]
-    fn fnc1_second_position_packs_the_application_indicator_as_a_byte() {
-        assert_eq!(
-            encode_fnc1_second_position(100),
-            bits![0, 1, 1, 0, 0, 1, 0, 0]
-        );
-    }
-
-    #[test]
-    fn structured_append_packs_its_three_fields() {
-        let expected = bits![0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1];
-        assert_eq!(encode_structured_append(2, 3, 1).unwrap(), expected);
     }
 
     fn single_segment_plan(mode: SegmentMode, data: &str, version: u8) -> SegmentPlan {
@@ -642,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "73 bits don't fit in 9 data codewords")]
+    #[should_panic(expected = "Result::unwrap()` on an `Err` value: BitsWouldOverflow(73, 72)")]
     fn formatting_rejects_data_over_capacity() {
         apply_formatting(bitvec![u8, Lsb0; 0; 73], 1, ErrorCorrectionLevel::H).unwrap();
     }
@@ -700,14 +596,6 @@ mod tests {
         assert_eq!(
             apply_error_correction(&[0x10, 0x20], 1, ErrorCorrectionLevel::M).unwrap_err(),
             EncodeDataError::InvalidByteCount(2, 16)
-        );
-    }
-
-    #[test]
-    fn structured_append_rejects_a_sequence_number_above_15() {
-        assert_eq!(
-            encode_structured_append(16, 0, 0).unwrap_err(),
-            EncodeDataError::StructuredAppendOutOfRange
         );
     }
 }

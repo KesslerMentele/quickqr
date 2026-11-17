@@ -8,16 +8,12 @@ pub enum EncodeDataError {
     InvalidChar(char),
     /// A double-byte Shift-JIS code point outside the two ranges QR Kanji mode can represent.
     KanjiOutOfRange(u16),
-    /// An ECI designator outside the 0..=999999 range the three encoding lengths can hold.
-    EciOutOfRange(u32),
     /// The value in bits does not fit in the provided amount of bits.
     BitsWouldOverflow(u32, usize),
     /// The codeword count of the data does not match the expected value
     InvalidByteCount(usize, usize),
     /// The provided bit length is invalid.
     InvalidBitLength(usize),
-    /// A structured-append sequence number or total-symbol count outside 0..=15.
-    StructuredAppendOutOfRange,
     /// The requested encoding mode has not been implemented.
     NotImplemented
 }
@@ -30,12 +26,6 @@ impl fmt::Display for EncodeDataError {
             }
             EncodeDataError::KanjiOutOfRange(val) => {
                 write!(f, "Kanji out of range: {}", val)
-            }
-            EncodeDataError::EciOutOfRange(val) => {
-                write!(f, "Eci out of range: {}", val)
-            }
-            EncodeDataError::StructuredAppendOutOfRange => {
-                write!(f, "Structured append out of range")
             }
             EncodeDataError::InvalidBitLength(val) => {
                 write!(f, "Invalid bits length: {}", val)

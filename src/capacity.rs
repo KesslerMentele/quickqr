@@ -49,6 +49,9 @@ const ERROR_CORRECTION_BLOCKS: [[u8; 40]; 4] = [
     [  1,  1,  2,  4,  4,  4,  5,  6,  8,  8, 11, 11, 16, 16, 18, 16, 19, 21, 25, 25, 25, 34, 30, 32, 35, 37, 40, 42, 45, 48, 51, 54, 57, 60, 63, 66, 70, 74, 77, 81], // H
 ];
 
+/// One `EC_TABLE` entry, in `EcBlockInfo`'s field order (see below).
+type EcTableEntry = (u16, u16, u16, u16, u16, u16);
+
 /// Error correction block characteristics, derived from ISO/IEC 18004 Table 9.
 /// Indexed by `[version - 1][level]`, `level` ordered L, M, Q, H. Columns per row, matching
 ///
@@ -61,7 +64,7 @@ const ERROR_CORRECTION_BLOCKS: [[u8; 40]; 4] = [
 ///     4: Number of Blocks in Group 2
 ///     5: Number of Data Codewords in Group 2's Blocks
 ///```
-const EC_TABLE: [[(u16, u16, u16, u16, u16, u16); 4]; 40] = [
+const EC_TABLE: [[EcTableEntry; 4]; 40] = [
     [(19, 7, 1, 19, 0, 0), (16, 10, 1, 16, 0, 0), (13, 13, 1, 13, 0, 0), (9, 17, 1, 9, 0, 0)],
     [(34, 10, 1, 34, 0, 0), (28, 16, 1, 28, 0, 0), (22, 22, 1, 22, 0, 0), (16, 28, 1, 16, 0, 0)],
     [(55, 15, 1, 55, 0, 0), (44, 26, 1, 44, 0, 0), (34, 18, 2, 17, 0, 0), (26, 22, 2, 13, 0, 0)],

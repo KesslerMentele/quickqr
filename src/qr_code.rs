@@ -207,7 +207,7 @@ pub struct QrCode {
 impl QrCode {
     /// Generates a [QrCode] with the default settings.
     pub fn new<S: Into<String>>(data: S) -> Result<QrCode, CreateQrError> {
-        Ok(QrCode::with_config(&QrConfiguration::new(data))?)
+        QrCode::with_config(&QrConfiguration::new(data))
     }
     /// Generates a [QrCode] with the provided settings.
     pub fn with_config(data: &QrConfiguration) -> Result<QrCode, CreateQrError> {
@@ -257,6 +257,7 @@ impl fmt::Display for QrCode {
 
 
 /// The eight mask patterns.
+#[cfg(feature = "serde")]
 const MASK_PATTERNS: RangeInclusive<u8> = 0..=7;
 
 /// The mask pattern setting options for creating a QR code.
@@ -455,10 +456,10 @@ pub(crate) fn create_qr_code_bits(
     
     let mode = match data.encoding_mode {
         EncodingMode::Segmented => {
-            let segment_plan = segment(&*data.text, data.version, data.error_correction_level)?;
-            return Ok(encode_data_by_encoding_plan(&*data.text, segment_plan)?);
+            let segment_plan = segment(&data.text, data.version, data.error_correction_level)?;
+            return encode_data_by_encoding_plan(&data.text, segment_plan);
         }
-        EncodingMode::Auto => best_single_mode(&*data.text),
+        EncodingMode::Auto => best_single_mode(&data.text),
         EncodingMode::Numeric => SegmentMode::Numeric,
         EncodingMode::Alphanumeric => SegmentMode::Alphanumeric,
         EncodingMode::Byte => SegmentMode::Byte,
@@ -474,7 +475,7 @@ pub(crate) fn create_qr_code_bits(
             return Err(CreateQrError::NotImplemented(mode));
         }
     };
-    encode_single_segment(&*data.text, mode, data.version, data.error_correction_level)
+    encode_single_segment(&data.text, mode, data.version, data.error_correction_level)
 }
 
 /// Takes [EncodedData] and interleaves it, returning a [BitVec] representing the raw bits to be

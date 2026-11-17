@@ -10,14 +10,10 @@ use crate::EncodeDataError;
 ///
 /// If the provided bit length is invalid.
 pub(crate) fn write_bits(bits: &mut BitVec<u8, Lsb0>, value: u32, bit_length: usize) -> Result<(), EncodeDataError > {
-    debug_assert!(
-        bit_length == 32 || value < (1u32 << bit_length),
-        "value {value} does not fit in {bit_length} bits"
-    );
-    if 1 > bit_length || bit_length > 32 {
+    if !(1..=32).contains(&bit_length) {
         return Err(EncodeDataError::InvalidBitLength(bit_length))
     }
-    if bit_length > 32 ||  value >= (1u32 << bit_length) {
+    if bit_length < 32 && value >= (1u32 << bit_length) {
         return Err(EncodeDataError::BitsWouldOverflow(value, bit_length));
     }
     bits.extend((0..bit_length).rev().map(|i| (value >> i) & 1 == 1));

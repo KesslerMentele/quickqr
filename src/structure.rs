@@ -339,8 +339,8 @@ impl QrMatrix {
             MaskSetting::Auto => {
                 // try all the masks and select the mask with the lowest penalty
                 let value = (0..8).map( |mask| {
-                    let proposal = &self.with_mask(mask).unwrap(); // This is only ever iterating on 0..8, guaranteed safe
-                    return (penalty_score(proposal, self.size, self.size).total, mask)
+                    let proposal = self.with_mask(mask).unwrap(); // This is only ever iterating on 0..8, guaranteed safe
+                    (penalty_score(&proposal, self.size, self.size).total, mask)
                 }).min_by_key(|(k, _)| *k).map(|(_,mask)| mask).unwrap();
 
                 self.set_mask(MaskSetting::Exact(value))
@@ -628,7 +628,7 @@ mod tests {
             let matrix = QrMatrix::new(version, ErrorCorrectionLevel::M);
             let order: Vec<_> = matrix.data_module_order().collect();
             let distinct: std::collections::HashSet<_> = order.iter().collect();
-            assert_eq!(order.len(), raw_data_modules(version.try_into().unwrap()), "version {version}");
+            assert_eq!(order.len(), raw_data_modules(version.into()), "version {version}");
             assert_eq!(distinct.len(), order.len(), "version {version}");
         }
     }
@@ -694,7 +694,7 @@ mod tests {
         for version in 1..=40u8 {
             let matrix = QrMatrix::new(version, ErrorCorrectionLevel::M);
             let free = matrix.size() * matrix.size() - matrix.function.count_ones();
-            assert_eq!(free, raw_data_modules(version.try_into().unwrap()), "version {version}");
+            assert_eq!(free, raw_data_modules(version.into()), "version {version}");
         }
     }
 
