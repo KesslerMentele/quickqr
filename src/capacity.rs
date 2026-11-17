@@ -157,8 +157,7 @@ pub(crate) fn ec_block_info(version: u8, level: ErrorCorrectionLevel) -> EcBlock
 /// Codewords available for data including segments, terminator and padding at a given version and
 /// [`ErrorCorrectionLevel`](ErrorCorrectionLevel).
 pub(crate) fn data_codewords(version: u8, level: ErrorCorrectionLevel) -> usize {
-    (total_codewords(version) - ecc_codewords_per_block(version, level))
-        * error_correction_blocks(version, level)
+    total_codewords(version) - (ecc_codewords_per_block(version, level) * error_correction_blocks(version, level))
 }
 
 #[cfg(test)]
