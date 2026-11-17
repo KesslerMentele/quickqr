@@ -1,20 +1,3 @@
-// The function patterns of a QR symbol (ISO/IEC 18004 section 6.3): every module that isn't
-// data or error correction. They're drawn onto an empty matrix before data placement, and marked
-// as function modules so that placement and masking skip them.
-//
-// Layout, for a symbol `size` = 4 * version + 17 modules wide:
-//  - Finder patterns: 7x7 concentric squares in the top-left, top-right and bottom-left corners.
-//  - Separators: a 1-module light border around each finder, on its inner sides.
-//  - Timing patterns: alternating modules along row 6 and column 6, between the separators.
-//  - Dark module: always dark, at (4 * version + 9, 8).
-//  - Alignment patterns: 5x5 concentric squares (version 2+), centered on every pairing of the
-//    version's alignment coordinates, except the three that would overlap a finder.
-//  - Format information: 15 modules beside the top-left finder, mirrored across the other two.
-//  - Version information: 6x3 blocks beside the top-right and bottom-left finders (version 7+).
-//
-// Format and version information depend on the error correction level, mask and version
-// encodings, so for now their areas are only reserved (left light).
-
 use std::fmt;
 use std::ops::RangeInclusive;
 use bitvec::prelude::*;
@@ -22,8 +5,7 @@ pub(crate) use crate::errors::ApplyMaskError;
 use crate::penalty_score::penalty_score;
 use crate::qr_code::{ErrorCorrectionLevel, MaskSetting};
 
-/// Alignment pattern center coordinates for each version, indexed by `version - 1`. Every pairing
-/// of two coordinates is a center, apart from the three that overlap a finder pattern.
+/// Alignment pattern center coordinates for each version, indexed by `version - 1`.
 const ALIGNMENT_PATTERN_COORDINATES: [&[u8]; 40] = [
     &[],
     &[6, 18],
@@ -67,7 +49,7 @@ const ALIGNMENT_PATTERN_COORDINATES: [&[u8]; 40] = [
     &[6, 30, 58, 86, 114, 142, 170],
 ];
 
-/// A grid of modules representing a QR Code, stored row-major.
+/// A grid of modules representing a QR Code.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrMatrix {
@@ -128,6 +110,7 @@ impl QrMatrix {
         self.version
     }
 
+    #[cfg(test)]
     /// Every module, row-major, `true` for dark.
     pub(crate) fn modules(&self) -> &BitSlice<u8, Lsb0> {
         &self.modules
@@ -379,8 +362,7 @@ impl QrMatrix {
     }
 }
 
-/// The number of bits needed to represent `value` (0 for zero), i.e. its index of its highest
-/// set bit, plus one.
+/// The number of bits needed to represent `value`, i.e. the index of the highest set bit, plus one.
 fn bit_length(mut value: u32) -> u32 {
     let mut length = 0;
     while value != 0 {
@@ -413,7 +395,9 @@ fn bch_remainder(data: u32, generator: u32) -> u32 {
 /// The data-masking predicate for mask pattern `pattern` (0-7): `true` means "invert this
 /// module". ISO/IEC 18004 Table 10.
 ///
-/// Returns `Err(MaskError::InvalidMaskVersion(pattern))` if `pattern` is greater than 7.
+/// # Errors
+/// 
+/// If `pattern` is greater than 7.
 pub(crate) fn mask_predicate(pattern: u8) -> Result<fn(usize, usize) -> bool, ApplyMaskError> {
     match pattern {
         0 => Ok(|row: usize, col: usize| (row + col) % 2 == 0),
@@ -454,8 +438,8 @@ pub(crate) fn format_information_positions(size: usize, i: usize) -> [(usize, us
     [(row, 8), (8, col)]
 }
 
+#[cfg(test)]
 /// Every data module of a `version` symbol as `(row, col)`, in the order data bits are placed.
-/// The layout depends only on the version, so this needs no actual symbol to read from.
 pub(crate) fn data_module_positions(version: u8) -> Vec<(usize, usize)> {
     // The level only affects the contents of the format information, never which modules it owns.
     QrMatrix::new(version, ErrorCorrectionLevel::M).data_module_order().collect()

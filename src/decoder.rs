@@ -385,7 +385,7 @@ mod tests {
 
         let mut bits = BitVec::new();
         for (value, bit_length) in [(0b0010, 4), (5, 9), (10 * 45 + 12, 11), (41 * 45 + 4, 11), (2, 6)] {
-            write_bits(&mut bits, value, bit_length);
+            write_bits(&mut bits, value, bit_length).unwrap();
         }
         let codewords = bits_to_bytes_for_test(&bits);
         assert_eq!(decode_segments(&codewords, 1), Ok("AC-42".to_string()));
@@ -394,10 +394,10 @@ mod tests {
     #[test]
     fn decodes_a_byte_segment_with_multibyte_utf8() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 0b0100, 4);
-        write_bits(&mut bits, 2, 8);
-        write_bits(&mut bits, 0xC3, 8);
-        write_bits(&mut bits, 0xA9, 8);
+        write_bits(&mut bits, 0b0100, 4).unwrap();
+        write_bits(&mut bits, 2, 8).unwrap();
+        write_bits(&mut bits, 0xC3, 8).unwrap();
+        write_bits(&mut bits, 0xA9, 8).unwrap();
         let codewords = bits_to_bytes_for_test(&bits);
         assert_eq!(decode_segments(&codewords, 1), Ok("é".to_string()));
     }
@@ -406,9 +406,9 @@ mod tests {
     #[cfg(feature = "kanji")]
     fn decodes_a_kanji_segment() {
         let mut bits = BitVec::new();
-        write_bits(&mut bits, 0b1000, 4);
-        write_bits(&mut bits, 1, 8);
-        write_bits(&mut bits, 0x0D9F, 13);
+        write_bits(&mut bits, 0b1000, 4).unwrap();
+        write_bits(&mut bits, 1, 8).unwrap();
+        write_bits(&mut bits, 0x0D9F, 13).unwrap();
         let codewords = bits_to_bytes_for_test(&bits);
         assert_eq!(decode_segments(&codewords, 1), Ok("点".to_string()));
     }

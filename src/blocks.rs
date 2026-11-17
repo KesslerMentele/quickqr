@@ -55,6 +55,7 @@ pub(crate) fn interleave(data: &BitSlice<u8, Lsb0>, version: u8, error_correctio
     result
 }
 
+#[cfg(test)]
 /// The inverse of `interleave`, for a symbol's codewords: one `data + error_correction` sequence
 /// per block.
 pub(crate) fn deinterleave(codewords: &[u8], info: EcBlockInfo) -> Vec<Vec<u8>> {

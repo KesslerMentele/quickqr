@@ -177,6 +177,7 @@ impl fmt::Display for Gf256 {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
 struct Gf256Polynomial(Vec<Gf256>);
 impl Gf256Polynomial {
+#[cfg(test)]
     /// Returns the number of coefficients stored (one more than the degree, assuming no
     /// trailing zero coefficients have been trimmed).
     fn len(&self) -> usize {
@@ -192,6 +193,7 @@ impl Gf256Polynomial {
         Gf256Polynomial(shifted)
     }
 
+#[cfg(test)]
     /// Reduces the polynomial mod x^n: keeps only the n lowest-degree coefficients (the terms
     /// of degree < n).
     fn truncate(mut self, n: usize) -> Self {
@@ -199,11 +201,13 @@ impl Gf256Polynomial {
         self
     }
 
+#[cfg(test)]
     /// Returns true if every coefficient is zero.
     fn is_zero(&self) -> bool {
         self.0.iter().all(|&coefficient| coefficient == Gf256::default())
     }
 
+#[cfg(test)]
     /// Evaluates the polynomial at `x` using Horner's method.
     fn evaluate(&self, x: Gf256) -> Gf256 {
         self.0
@@ -212,6 +216,7 @@ impl Gf256Polynomial {
             .fold(Gf256::default(), |acc, &coefficient| acc * x + coefficient)
     }
 
+#[cfg(test)]
     /// Returns the formal derivative of the polynomial over GF(2^n). Since the field has
     /// characteristic 2, differentiating x^i gives `i * x^(i-1)` reduced mod 2, which zeroes
     /// out every even-power term and keeps only the odd-power ones, shifted down one degree.
@@ -271,6 +276,7 @@ impl fmt::Display for Gf256Polynomial {
     }
 }
 
+#[cfg(test)]
 /// An error found by `chien_search`: the byte position it occurred at within the block, plus
 /// the locator root's reciprocal ("error locator number") needed by `forney_magnitude`.
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default)]
@@ -279,6 +285,7 @@ struct LocatedError {
     locator_number: Gf256,
 }
 
+#[cfg(test)]
 impl fmt::Display for LocatedError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} at position {}", self.locator_number, self.position)
@@ -313,6 +320,7 @@ fn reed_solomon_remainder(data: Gf256Polynomial, ec_len: EcLength) -> Gf256Polyn
     Gf256Polynomial(poly)
 }
 
+#[cfg(test)]
 /// Evaluates `received` at each power of α used by `ec_len`'s generator polynomial, producing the
 /// syndrome polynomial. All syndromes are zero if the block decodes as error-free.
 fn compute_syndromes(received: &Gf256Polynomial, ec_len: EcLength) -> Gf256Polynomial {
@@ -321,6 +329,7 @@ fn compute_syndromes(received: &Gf256Polynomial, ec_len: EcLength) -> Gf256Polyn
         .collect();
     Gf256Polynomial(syndromes)
 }
+#[cfg(test)]
 /// Runs the Berlekamp-Massey algorithm over `syndromes` to find the shortest linear feedback
 /// shift register that generates them. The reciprocals of its roots mark the error positions within
 /// the block.
@@ -363,12 +372,14 @@ fn berlekamp_massey(syndromes: Gf256Polynomial) -> Gf256Polynomial {
 
     current_best_locator
 }
+#[cfg(test)]
 /// Computes the error evaluator polynomial `ω(x) = (S(x) * λ(x)) mod x^n`, used
 /// together with the locator's derivative by `forney_magnitude` to recover error magnitudes.
 fn error_evaluator(syndromes: Gf256Polynomial, locator: Gf256Polynomial) -> Gf256Polynomial {
     let n = syndromes.len();
     (syndromes * locator).truncate(n)
 }
+#[cfg(test)]
 /// Searches for the roots of `locator` among the field elements `α^0 .. α^(block_length - 1)`
 /// (the Chien search), returning one `LocatedError` per root found.
 fn chien_search(locator: &Gf256Polynomial, block_length: usize) -> Vec<LocatedError> {
@@ -383,11 +394,13 @@ fn chien_search(locator: &Gf256Polynomial, block_length: usize) -> Vec<LocatedEr
         })
         .collect()
 }
+#[cfg(test)]
 /// Computes the magnitude of the error at a located root via the Forney algorithm:
 /// `locator_number * (ω(root) / derivative(root))`.
 fn forney_magnitude(omega: Gf256Polynomial, derivative: Gf256Polynomial, locator_number: Gf256, root: Gf256) -> Gf256 {
     locator_number * (omega.evaluate(root) / derivative.evaluate(root))
 }
+#[cfg(test)]
 /// Attempts to correct errors in `block` (one QR data+EC codeword block) using Reed-Solomon
 /// decoding. Returns `block` unchanged if its syndromes are already zero, or if more errors
 /// are found than the locator's degree allows for, since the result can't be trusted then.

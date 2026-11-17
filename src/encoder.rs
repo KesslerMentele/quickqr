@@ -51,8 +51,8 @@ fn encode_alphanumeric(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> 
     let mut bits = BitVec::new();
     for pair in values.chunks(2) {
         match pair {
-            &[first, second] => write_bits(&mut bits, first as u32 * 45 + second as u32, 11)?,
-            &[single] => write_bits(&mut bits, single as u32, 6)?,
+            [first, second] => write_bits(&mut bits, *first as u32 * 45 + *second as u32, 11)?,
+            [single] => write_bits(&mut bits, *single as u32, 6)?,
             _ => unreachable!("chunks(2) never yields an empty or larger-than-2 group"),
         }
     }
@@ -124,20 +124,21 @@ fn encode_kanji(data: &str) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
 /// # Errors
 ///
 /// If the ECI designator is out of range.
+#[cfg_attr(not(test), expect(dead_code, reason = "ECI mode isn't wired into the encoder yet"))]
 fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     let mut bits = BitVec::new();
     match designator {
         0..=127 => {
-            write_bits(&mut bits, 0, 1);
-            write_bits(&mut bits, designator, 7);
+            write_bits(&mut bits, 0, 1)?;
+            write_bits(&mut bits, designator, 7)?;
         }
         128..=16_383 => {
-            write_bits(&mut bits, 0b10, 2);
-            write_bits(&mut bits, designator, 14);
+            write_bits(&mut bits, 0b10, 2)?;
+            write_bits(&mut bits, designator, 14)?;
         }
         16_384..=999_999 => {
-            write_bits(&mut bits, 0b110, 3);
-            write_bits(&mut bits, designator, 21);
+            write_bits(&mut bits, 0b110, 3)?;
+            write_bits(&mut bits, designator, 21)?;
         }
         _ => return Err(EncodeDataError::EciOutOfRange(designator)),
     }
@@ -146,29 +147,32 @@ fn encode_eci(designator: u32) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
 
 /// Encodes FNC1-in-first-position. It carries no data of its own beyond its mode indicator so there
 /// are no data bits to append.
+#[cfg_attr(not(test), expect(dead_code, reason = "FNC1 mode isn't wired into the encoder yet"))]
 fn encode_fnc1_first_position() -> BitVec<u8, Lsb0> {
     BitVec::new()
 }
 
 /// Encodes FNC1-in-second-position's Application Indicator as QR data bits. Resolving an AI to its
 /// 8-bit value is the caller's responsibility.
+#[cfg_attr(not(test), expect(dead_code, reason = "FNC1 mode isn't wired into the encoder yet"))]
 fn encode_fnc1_second_position(application_indicator: u8) -> BitVec<u8, Lsb0> {
     let mut bits = BitVec::new();
-    write_bits(&mut bits, application_indicator as u32, 8);
+    write_bits(&mut bits, application_indicator as u32, 8).expect("a u8 always fits in 8 bits");
     bits
 }
 
 /// Encodes Structured Append's header fields as QR data bits: a 4-bit sequence number, a
 /// 4-bit total-symbol count (both 0..=15), and an 8-bit parity byte.
+#[cfg_attr(not(test), expect(dead_code, reason = "Structured Append isn't wired into the encoder yet"))]
 fn encode_structured_append(sequence_number: u8, total_symbols: u8, parity: u8, ) -> Result<BitVec<u8, Lsb0>, EncodeDataError> {
     if sequence_number > 15 || total_symbols > 15 {
         return Err(EncodeDataError::StructuredAppendOutOfRange);
     }
 
     let mut bits = BitVec::new();
-    write_bits(&mut bits, sequence_number as u32, 4);
-    write_bits(&mut bits, total_symbols as u32, 4);
-    write_bits(&mut bits, parity as u32, 8);
+    write_bits(&mut bits, sequence_number as u32, 4)?;
+    write_bits(&mut bits, total_symbols as u32, 4)?;
+    write_bits(&mut bits, parity as u32, 8)?;
     Ok(bits)
 }
 
@@ -223,6 +227,7 @@ pub(crate) fn alphanumeric_value(c: char) -> Option<u8> {
     }
 }
 
+#[cfg(test)]
 /// Maps a value in QR's 45-character alphanumeric set back to its character. Inverse of
 /// `alphanumeric_value`; `None` if `value` isn't one any character maps to.
 pub(crate) fn alphanumeric_char(value: u8) -> Option<char> {
@@ -327,6 +332,7 @@ pub(crate) fn apply_formatting(
 /// # Errors
 ///
 /// If `data_codewords` isn't exactly the data codeword count `apply_formatting` produces.
+#[cfg_attr(not(test), expect(dead_code, reason = "superseded by blocks::interleave; kept for its tests"))]
 pub(crate) fn apply_error_correction(
     data_codewords: &[u8],
     version: u8,
@@ -364,13 +370,13 @@ pub(crate) fn apply_error_correction(
     for i in 0..=short_length {
         for block in &blocks {
             if let Some(&codeword) = block.get(i) {
-                write_bits(&mut bits, codeword as u32, 8);
+                write_bits(&mut bits, codeword as u32, 8)?;
             }
         }
     }
     for i in 0..ec_per_block {
         for ec_block in &ec_blocks {
-            write_bits(&mut bits, ec_block[i] as u32, 8);
+            write_bits(&mut bits, ec_block[i] as u32, 8)?;
         }
     }
     Ok(bits)
@@ -505,21 +511,21 @@ mod tests {
     #[test]
     fn eci_one_byte_range_has_a_zero_prefix() {
         let mut expected = bits![u8, Lsb0; 0].to_bitvec();
-        write_bits(&mut expected, 127, 7);
+        write_bits(&mut expected, 127, 7).unwrap();
         assert_eq!(encode_eci(127).unwrap(), expected);
     }
 
     #[test]
     fn eci_two_byte_range_has_a_10_prefix() {
         let mut expected = bits![u8, Lsb0; 1, 0].to_bitvec();
-        write_bits(&mut expected, 128, 14);
+        write_bits(&mut expected, 128, 14).unwrap();
         assert_eq!(encode_eci(128).unwrap(), expected);
     }
 
     #[test]
     fn eci_three_byte_range_has_a_110_prefix() {
         let mut expected = bits![u8, Lsb0; 1, 1, 0].to_bitvec();
-        write_bits(&mut expected, 16_384, 21);
+        write_bits(&mut expected, 16_384, 21).unwrap();
         assert_eq!(encode_eci(16_384).unwrap(), expected);
     }
 
@@ -549,7 +555,7 @@ mod tests {
 
     fn single_segment_plan(mode: SegmentMode, data: &str, version: u8) -> SegmentPlan {
         SegmentPlan {
-            version: version ,
+            version,
             segments: vec![Segment { mode, range: 0..data.len() }],
             data_bits_length: 0,
         }
@@ -560,9 +566,9 @@ mod tests {
     fn plan_header_counts_kanji_chars_not_bytes() {
         // 点 is 3 UTF-8 bytes but 1 char.
         let mut expected = BitVec::new();
-        write_bits(&mut expected, 0b1000, 4);
-        write_bits(&mut expected, 1, 8);
-        write_bits(&mut expected, 0x0D9F, 13);
+        write_bits(&mut expected, 0b1000, 4).unwrap();
+        write_bits(&mut expected, 1, 8).unwrap();
+        write_bits(&mut expected, 0x0D9F, 13).unwrap();
         let plan = single_segment_plan(SegmentMode::Kanji, "点", 1);
         assert_eq!(encode_data_by_encoding_plan("点", plan).unwrap().bits, expected);
     }
@@ -571,10 +577,10 @@ mod tests {
     fn plan_header_counts_byte_mode_in_utf8_bytes() {
         // é is 2 UTF-8 bytes: 0xC3 0xA9.
         let mut expected = BitVec::new();
-        write_bits(&mut expected, 0b0100, 4);
-        write_bits(&mut expected, 2, 8);
-        write_bits(&mut expected, 0xC3, 8);
-        write_bits(&mut expected, 0xA9, 8);
+        write_bits(&mut expected, 0b0100, 4).unwrap();
+        write_bits(&mut expected, 2, 8).unwrap();
+        write_bits(&mut expected, 0xC3, 8).unwrap();
+        write_bits(&mut expected, 0xA9, 8).unwrap();
         let plan = single_segment_plan(SegmentMode::Byte, "é", 1);
         assert_eq!(encode_data_by_encoding_plan("é", plan).unwrap().bits, expected);
     }
@@ -583,9 +589,9 @@ mod tests {
     fn plan_header_widens_numeric_count_in_the_large_group() {
         // Numeric's count indicator is 14 bits from version 27.
         let mut expected = BitVec::new();
-        write_bits(&mut expected, 0b0001, 4);
-        write_bits(&mut expected, 1, 14);
-        write_bits(&mut expected, 7, 4);
+        write_bits(&mut expected, 0b0001, 4).unwrap();
+        write_bits(&mut expected, 1, 14).unwrap();
+        write_bits(&mut expected, 7, 4).unwrap();
         let plan = single_segment_plan(SegmentMode::Numeric, "7", 27);
         assert_eq!(encode_data_by_encoding_plan("7", plan).unwrap().bits, expected);
     }
@@ -599,7 +605,7 @@ mod tests {
     fn iso_example_bits() -> BitVec<u8, Lsb0> {
         let mut bits = BitVec::new();
         for (value, bit_length) in [(0b0001, 4), (8, 10), (12, 10), (345, 10), (67, 7)] {
-            write_bits(&mut bits, value, bit_length);
+            write_bits(&mut bits, value, bit_length).unwrap();
         }
         bits
     }
@@ -638,7 +644,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "73 bits don't fit in 9 data codewords")]
     fn formatting_rejects_data_over_capacity() {
-        apply_formatting(bitvec![u8, Lsb0; 0; 73], 1, ErrorCorrectionLevel::H);
+        apply_formatting(bitvec![u8, Lsb0; 0; 73], 1, ErrorCorrectionLevel::H).unwrap();
     }
 
     #[test]

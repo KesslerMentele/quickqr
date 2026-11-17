@@ -13,7 +13,7 @@ use crate::structure::QrMatrix;
 /// The symbol versions QR codes come in.
 const VERSIONS: RangeInclusive<u8> = 1..=40;
 
-/// The version choices that can be used to create a QR code. Either `"Auto"` or a value from 1-40.
+/// The version choices that can be used to create a QR code. Either [`Auto`](QrVersion::Auto) or a value from 1-40.
 /// Defaults to [QrVersion::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum QrVersion {
@@ -206,7 +206,7 @@ pub struct QrCode {
 }
 impl QrCode {
     /// Generates a [QrCode] with the default settings.
-    pub fn new(data: String) -> Result<QrCode, CreateQrError> {
+    pub fn new<S: Into<String>>(data: S) -> Result<QrCode, CreateQrError> {
         Ok(QrCode::with_config(&QrConfiguration::new(data))?)
     }
     /// Generates a [QrCode] with the provided settings.
@@ -294,9 +294,9 @@ pub struct QrConfiguration {
 }
 impl QrConfiguration {
     /// Settings for encoding `text`, with every other setting at its default.
-    pub fn new(text: String) -> QrConfiguration {
+    pub fn new<S: Into<String> >(text: S ) -> QrConfiguration {
         QrConfiguration {
-            text,
+            text: text.into(),
             error_correction_level: ErrorCorrectionLevel::default(),
             encoding_mode: EncodingMode::default(),
             version: QrVersion::default(),
@@ -505,7 +505,7 @@ mod tests {
     fn fields(fields: &[(u32, usize)]) -> BitVec<u8, Lsb0> {
         let mut bits = BitVec::new();
         for &(value, bit_length) in fields {
-            write_bits(&mut bits, value, bit_length);
+            write_bits(&mut bits, value, bit_length).unwrap();
         }
         bits
     }

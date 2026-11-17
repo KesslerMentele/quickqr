@@ -1,5 +1,4 @@
 use std::fmt;
-use std::fmt::write;
 use crate::qr_code::EncodingMode;
 
 /// Errors that occur during data encoding.
@@ -105,6 +104,7 @@ impl fmt::Display for CreateSegmentError {
     }
 }
 
+#[cfg(test)]
 /// Errors to do with decoding a QR code back into the original message
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub(crate) enum DecodeDataError {
@@ -113,7 +113,7 @@ pub(crate) enum DecodeDataError {
     /// Neither copy of the format information is close enough to a valid codeword to trust, so
     /// the error correction level and mask are unknown.
     UnreadableFormatInformation,
-    /// A block has more errors than its error correction codewuse encoding_rs::SHIFT_JIS;ords can repair.
+    /// A block has more errors than its error correction codewords can repair.
     UncorrectableBlock,
     /// Ran out of bits midsegment.
     UnexpectedEnd,
@@ -127,6 +127,7 @@ pub(crate) enum DecodeDataError {
     #[cfg(feature = "kanji")]
     InvalidKanjiCodePoint(u16),
 }
+#[cfg(test)]
 impl fmt::Display for DecodeDataError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

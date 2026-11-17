@@ -1,38 +1,3 @@
-// Segments are bitstrings, concatenated without any byte-alignment.
-
-// PEDAC
-// Problem:
-//  We want to create the most efficient packing for a given sequence of data. We have a variety of
-//  encoding modes available to us, each with its own set of characters it can encode. Every time we
-//  swap modes, we incur a penalty, having to insert a header to identify which encoder to switch to.
-//
-//  The header's size (4-bit mode indicator + character count indicator) depends on the version
-//  group (1-9, 10-26, 27-40), so the optimal segmentation is computed per version group.
-
-// Examples:
-// https://www.imperialviolet.org/2021/08/26/qrencoding.html
-// https://github.com/Shane32/QRCoder/pull/676
-// https://observablehq.com/@zavierhenry/encoding-qr-codes
-// https://www.barcodefaq.com/2d/qr-code/qr-code-auto-encoding-mode/
-
-// Data Structures / Algorithm
-// Shortest-path over (position, mode):
-//  - All costs are measured in sixths of a bit, so that grouped modes have integer per-char costs
-//    (numeric 10 bits / 3 chars = 20, alphanumeric 11 bits / 2 chars = 33)
-//  - table[i][m] is the cheapest cost of encoding the first i chars, given the segment covering
-//    char i - 1 is in mode m (still open, so not yet rounded).
-//  - For each char, each mode m can either continue its own open segment, or close the cheapest
-//    segment of any mode (rounded up) and open a new one in m by paying header(m).
-//  - Each cell remembers which mode it came from, so the segments are recovered by walking back
-//    from the cheapest final cell.
-//
-// Version selection:
-//  - Fixed: segment with that version's group, then check the result fits its capacity.
-//  - Auto: segment once per version group (smallest first), and take the first version in that
-//    group whose capacity holds the result.
-
-// Code
-
 use std::fmt;
 use std::ops::Range;
 use crate::capacity;
@@ -42,8 +7,7 @@ use crate::encoder::shift_jis_kanji;
 pub(crate) use crate::errors::CreateSegmentError;
 use crate::qr_code::{ErrorCorrectionLevel, QrVersion};
 
-/// The data modes that take part in segmentation. ECI, FNC1 and Structured Append are prefixes,
-/// not alternatives for encoding a run of characters, so they're added by the caller.
+/// The data modes that take part in segmentation.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SegmentMode {
@@ -51,8 +15,7 @@ pub enum SegmentMode {
     Alphanumeric,
     #[default]
     Byte,
-    Kanji,
-    // ECI
+    Kanji
 }
 impl SegmentMode {
     const ALL: [SegmentMode; 4] = [
@@ -60,7 +23,6 @@ impl SegmentMode {
         SegmentMode::Alphanumeric,
         SegmentMode::Byte,
         SegmentMode::Kanji,
-        // SegmentMode::ECI,
     ];
 
     /// This mode's slot in a DP row.
@@ -107,8 +69,10 @@ impl fmt::Display for SegmentMode {
     }
 }
 
+/// Represents the width of the character count indicator.
+///
 /// Character count indicator widths change at versions 10 and 27; within a group, every version
-/// shares the same header costs and so the same optimal segmentation.
+/// shares the same header costs.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Copy)]
 pub(crate) enum VersionGroup {
     Small,
@@ -174,9 +138,7 @@ impl fmt::Display for VersionGroup {
     }
 }
 
-
-/// One run of `data` encoded in a single mode. `range` is in bytes, always on char boundaries,
-/// so `&data[range]` is the segment's text.
+/// Represents a range of bits and the encoding mode chosen for that range.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Segment {
     pub(crate) mode: SegmentMode,
@@ -191,7 +153,9 @@ impl fmt::Display for Segment {
 /// The result of segmentation: the version the data fits in, and how to split it.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct SegmentPlan {
+    /// The version this data is segmented for.
     pub(crate) version: u8,
+    /// The ranges of data and their encoding modes
     pub(crate) segments: Vec<Segment>,
     /// Total length of every segment's header and data, in bits.
     pub(crate) data_bits_length: usize,
@@ -202,9 +166,7 @@ impl fmt::Display for SegmentPlan {
     }
 }
 
-/// A DP cell: the cheapest cost to reach it, and the mode of the cell it was reached from.
-/// `from` equal to this cell's own mode means the segment continued; anything else means a new
-/// segment was opened here.
+/// A cell in the DP table: the cheapest cost to reach it, and the mode of the cell it was reached from.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Copy)]
 struct Step {
     cost: usize,
@@ -220,7 +182,7 @@ impl fmt::Display for Step {
 type DpTable = Vec<[Option<Step>; 4]>;
 
 
-/// Rounds a cost in sixths of a bit up to a whole bit (still in sixths).
+/// Rounds a cost in sixths of a bit up to a whole bit.
 fn round_up_to_bit(cost: usize) -> usize {
     cost.div_ceil(6) * 6
 }
@@ -249,12 +211,12 @@ fn optimal_segments(data: &str, group: VersionGroup) -> (Vec<Segment>, usize) {
 fn fill_table(data: &str, group: VersionGroup) -> DpTable {
     let mut table = Vec::with_capacity(data.len() + 1);
 
-    // Row 0: before any chars, every mode is "open" having paid only its header. `from` is
-    // irrelevant here, since `backtrack` stops at row 0.
+    // Row 0: before any chars, every mode is "open" having paid only its header..
     table.push(SegmentMode::ALL.map(|mode| Some(Step { cost: group.header_cost(mode), from: mode })));
 
     for c in data.chars() {
         let previous = table.last().expect("the table always has row 0");
+
         // Switching from the cheapest closed segment is the cheapest way to open any new one.
         let (switch_from, switch_cost) = cheapest_rounded(previous);
 
@@ -280,7 +242,9 @@ fn fill_table(data: &str, group: VersionGroup) -> DpTable {
 }
 
 /// The mode whose open segment in `row` is cheapest to close, and that cost rounded up to a whole
-/// bit. Ties go to the earlier mode in `SegmentMode::ALL`.
+/// bit.
+///
+/// Ties go to the earlier mode in [`SegmentMode::ALL`].
 fn cheapest_rounded(row: &[Option<Step>]) -> (SegmentMode, usize) {
     SegmentMode::ALL
         .into_iter()
@@ -297,8 +261,7 @@ fn backtrack(table: &DpTable, boundaries: &[usize], end_mode: SegmentMode, ) -> 
     for i in (1..table.len()).rev() {
         let char_range = boundaries[i - 1]..boundaries[i];
         // Walking backwards, so a char in the same mode extends the current segment's start.
-        // Switching never lands on the mode it left (continuing is always cheaper), so equal
-        // modes always mean the same segment.
+        // Equal modes always mean the same segment.
         match segments.last_mut() {
             Some(segment) if segment.mode == mode => segment.range.start = char_range.start,
             _ => segments.push(Segment { mode, range: char_range }),
@@ -312,15 +275,19 @@ fn backtrack(table: &DpTable, boundaries: &[usize], end_mode: SegmentMode, ) -> 
     segments
 }
 
-/// How many data bits `version` holds at `error_correction_level`, i.e. its data codewords * 8.
+/// How many data bits `version` holds at [`ErrorCorrectionLevel`].
+/// Its data codewords * 8.
 fn data_capacity_bits(version: u8, error_correction_level: ErrorCorrectionLevel) -> usize {
     capacity::data_codewords(version, error_correction_level) * 8
 }
 
 
 /// The single mode that best encodes all of `data` without segmentation: the narrowest mode
-/// whose character set covers every char, checked in Numeric, Alphanumeric, Kanji, Byte
-/// preference order. Byte mode encodes every char, so this always finds a mode.
+/// whose character set covers every char, checked in [Numeric](SegmentMode::Numeric),
+/// [Alphanumeric](SegmentMode::Alphanumeric), [Kanji](SegmentMode::Kanji),
+/// [Byte](SegmentMode::Byte) preference order.
+///
+/// Byte mode encodes every char, so this always finds a mode.
 pub(crate) fn best_single_mode(data: &str) -> SegmentMode {
     #[cfg(feature = "kanji")]
     const PREFERENCE: [SegmentMode; 4] =
@@ -335,7 +302,12 @@ pub(crate) fn best_single_mode(data: &str) -> SegmentMode {
         .expect("Byte mode encodes every char, so some mode always qualifies")
 }
 
-/// Splits `data` into segments, choosing the version per `choice`.
+/// Splits `data` into segments, choosing the version per [choice](QrVersion).
+///
+/// # Errors
+/// If the data exceeds the provided [`QrVersion`]'s bit capacity.
+///
+/// If the data exceeds even the largest [`QrVersion`]'s bit capacity.
 pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: ErrorCorrectionLevel, ) -> Result<SegmentPlan, CreateSegmentError> {
     // `choose_version` stops at the group it picks, so the last segmentation computed is that
     // group's.
@@ -351,14 +323,16 @@ pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: Err
 /// Chooses the version per `choice` for data that needs `bits_for(group)` bits in each version
 /// group, returning it with the bits needed there. Auto evaluates groups smallest first and stops
 /// at the first one with a version that fits.
+///
+/// # Errors
+/// If the data exceeds the provided [`QrVersion`]'s bit capacity.
+///
+/// If the data exceeds even the largest [`QrVersion`]'s bit capacity.
 pub(crate) fn choose_version(
     choice: QrVersion,
     error_correction_level: ErrorCorrectionLevel,
     mut bits_for: impl FnMut(VersionGroup) -> usize,
 ) -> Result<(u8, usize), CreateSegmentError> {
-    // A segment's character count can't overflow its count indicator here: in every group, the
-    // longest count the indicator holds needs more bits than the group's largest version has, so
-    // any data that passes the capacity check is representable.
     match choice {
         QrVersion::Exact(version) => {
             let needed_bits = bits_for(VersionGroup::of(version));

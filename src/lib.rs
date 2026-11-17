@@ -11,6 +11,7 @@ pub mod structure;
 mod penalty_score;
 mod gf_math;
 mod encoder;
+#[cfg(test)]
 mod decoder;
 mod capacity;
 mod blocks;
