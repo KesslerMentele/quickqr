@@ -13,7 +13,7 @@ use crate::structure::QrMatrix;
 /// The symbol versions QR codes come in.
 const VERSIONS: RangeInclusive<u8> = 1..=40;
 
-/// The version choices that can be used to create a QR code. Either [`Auto`](QrVersion::Auto) or a value from 1-40.
+/// The versions that can be used to create a QR code. Either [`Auto`](QrVersion::Auto) or a value from 1-40.
 /// Defaults to [QrVersion::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum QrVersion {
@@ -37,7 +37,7 @@ impl TryFrom<u8> for QrVersion {
     }
 }
 
-/// The encoding mode choices that can be used to create a QR code.
+/// The encoding mode that can be used to create a QR code.
 /// Defaults to [EncodingMode::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -80,7 +80,7 @@ impl fmt::Display for EncodingMode {
     }
 }
 
-/// The error correction level choices that can be used to create a QR code.
+/// The error correction level that can be used to create a QR code.
 /// Defaults to [ErrorCorrectionLevel::M]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -197,7 +197,7 @@ impl fmt::Display for QrStats {
     }
 }
 
-/// A finished QR code symbol
+/// A finished QR code symbol. Holds the [`matrix`](QrMatrix) and [`stats`](QrStats) for the code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrCode {
@@ -260,7 +260,7 @@ impl fmt::Display for QrCode {
 #[cfg(feature = "serde")]
 const MASK_PATTERNS: RangeInclusive<u8> = 0..=7;
 
-/// The mask pattern setting options for creating a QR code.
+/// The mask patterns for creating a QR code.
 /// Defaults to [MaskSetting::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum MaskSetting {
@@ -282,8 +282,7 @@ impl fmt::Display for MaskSetting {
 }
 
 
-/// The text to encode and how to encode it. Start with [`QrConfiguration::new`], change any settings,
-/// then call [`build`](QrConfiguration::build).
+/// The text to encode and how to encode it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrConfiguration {
