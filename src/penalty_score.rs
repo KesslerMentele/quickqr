@@ -175,6 +175,7 @@ fn penalty_score_st(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> M
     }
 }
 
+#[cfg(feature = "parallel")]
 /// Same result as [penalty_score_st], but runs each of the five sub-scores on its own thread.
 fn penalty_score_mt(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
     let (horizontal_score, vertical_score, squares_score, finder_pattern_score, ratio_score) =
@@ -206,7 +207,7 @@ fn penalty_score_mt(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> M
     }
 }
 
-
+#[cfg(feature = "parallel")]
 /// Picks [`penalty_score_st`] or [`penalty_score_mt`], whichever benchmarked faster for a grid
 /// this size.
 pub(crate) fn penalty_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
@@ -215,6 +216,13 @@ pub(crate) fn penalty_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usi
     } else {
         penalty_score_st(bits, width, height)
     }
+}
+
+#[cfg(not(feature = "parallel"))]
+/// Picks [`penalty_score_st`] or [`penalty_score_mt`], whichever benchmarked faster for a grid
+/// this size.
+pub(crate) fn penalty_score(bits: &BitSlice<u8, Lsb0>, width: usize, height: usize) -> MaskEvaluation {
+    penalty_score_st(bits, width, height)
 }
 
 #[cfg(test)]

@@ -9,9 +9,19 @@ pub enum EncodeDataError {
     /// A double-byte Shift-JIS code point outside the two ranges QR Kanji mode can represent.
     KanjiOutOfRange(u16),
     /// The value in bits does not fit in the provided amount of bits.
-    BitsWouldOverflow {bit_length: u32, bits_left: usize},
+    BitsWouldOverflow {
+        /// The length of the data in bits
+        bit_length: u32,
+        /// The length of the remaining space
+        bits_left: usize
+    },
     /// The codeword count of the data does not match the expected value
-    InvalidByteCount {actual_count: usize, expected_count: usize},
+    InvalidByteCount {
+        /// The count of codewords
+        actual_count: usize,
+        /// The expected count of codewords
+        expected_count: usize
+    },
     /// The provided bit length is invalid.
     InvalidBitLength(usize),
     /// The requested encoding mode has not been implemented.
@@ -43,7 +53,7 @@ impl fmt::Display for EncodeDataError {
     }
 }
 
-/// Errors to do with the [`QrVersion`](qr_code::QrVersion).
+/// Errors to do with the [QrVersionSetting](qr_code::QrVersionSetting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VersionError {
     /// The provided version is out of bounds (1-40).
@@ -76,9 +86,17 @@ impl fmt::Display for ApplyMaskError {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Copy)]
 pub enum CreateSegmentError {
     /// The data needs more bits than the requested version holds at this error correction level.
-    ExceedsVersionCapacity { needed_bits: usize, capacity_bits: usize },
+    ExceedsVersionCapacity {
+        /// The count of bits that this data can be compressed into
+        needed_bits: usize,
+        /// The count of available data bits
+        capacity_bits: usize
+    },
     /// The data needs more bits than even version 40 holds at this error correction level.
-    TooLong { needed_bits: usize },
+    TooLong {
+        /// The count of bits that this data can be compressed into
+        needed_bits: usize
+    },
 }
 impl std::error::Error for CreateSegmentError {}
 impl fmt::Display for CreateSegmentError {

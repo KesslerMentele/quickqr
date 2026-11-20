@@ -2,7 +2,7 @@
 name = "quickqr"
 version = "0.1.0"
 edition = "2024"
-description  = "…"
+description  = "This crate provides an encoder for standard QR codes."
 license      = "MIT OR Apache-2.0"
 readme       = "README.md"
 keywords     = ["qr", "qrcode", "barcode", "encoder"]
@@ -16,8 +16,10 @@ serde = { version = "1.0.229", features = ["derive"], optional = true }
 encoding_rs = { version = "0.8.44", features = ["fast-kanji-encode"], optional = true }
 
 [features]
+default = ["parallel"]
 serde = ["dep:serde", "serde/rc"]
 kanji = ["dep:encoding_rs"]
+parallel = []
 
 [dev-dependencies]
 serde_json = "1.0.154"

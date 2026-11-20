@@ -11,10 +11,14 @@ use crate::qr_code::{ErrorCorrectionLevel, QrVersionSetting};
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SegmentMode {
+    /// Flag representing the Numeric encoding mode for this segment
     Numeric,
+    /// Flag representing the Alphanumeric encoding mode for this segment
     Alphanumeric,
     #[default]
+    /// Flag representing the Byte encoding mode for this segment
     Byte,
+    /// Flag representing the Kanji encoding mode for this segment
     Kanji
 }
 impl SegmentMode {

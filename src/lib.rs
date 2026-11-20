@@ -3,6 +3,8 @@
 //! This crate provides an encoder for standard QR codes.
 //! Allows for numbers, text, kanji and binary encoding, while providing optimally-packed data
 //! and best-fit version selection.
+//!
+#![warn(missing_docs)]
 
 mod qr_code;
 mod errors;

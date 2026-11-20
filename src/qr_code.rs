@@ -62,15 +62,24 @@ impl TryFrom<u8> for QrVersionSetting {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EncodingMode {
+    /// The numeric encoding mode, for data that consists of only digits 0-9
     Numeric,
+    /// The alphanumeric encoding mode, for data the consists of only the A-Z and digits 0-9
     Alphanumeric,
+    /// The byte encoding mode, accepts any data
     Byte,
+    /// The kanj encoding mode, for encoding SHIFT-JIS characters
     Kanji,
+    /// The extended channel interpretation encoding mode, for creating codes with additional information
     Eci,
+    /// The function code one encoding mode, for inserting function characters into a qr code.
     Fnc1,
+    /// The structured Append encoding mode, for splitting a message across multiple qr codes.
     StructuredAppend,
     #[default]
+    /// Selects the best encoding mode for the data.
     Auto,
+    /// Selects the most efficient compression across multiple encoding modes.
     Segmented
 }
 impl TryFrom<SegmentMode> for EncodingMode {
@@ -105,10 +114,14 @@ impl Display for EncodingMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ErrorCorrectionLevel {
+    /// Error correction level L
     L,
     #[default]
+    /// Error correction level M
     M,
+    /// Error correction level Q
     Q,
+    /// Error correction level H
     H
 }
  impl Display for ErrorCorrectionLevel {
@@ -190,6 +203,7 @@ impl QrStats {
         self.version
     }
 
+    /// The [ErrorCorrectionLevel]
     pub fn error_correction_level(&self) -> ErrorCorrectionLevel {
         self.error_correction_level
     }
@@ -217,7 +231,7 @@ impl Display for QrStats {
     }
 }
 
-/// A finished QR code symbol. Holds the [`matrix`](QrMatrix) and [`stats`](QrStats) for the code.
+/// A finished QR code symbol. Holds the data and [`stats`](QrStats) for the code.
 ///
 /// With the `serde` feature, the modules serialize as one hex string: the symbol read row by
 /// row from the top-left, most significant bit first, `1` for dark, zero-padded to a whole byte.
@@ -230,10 +244,18 @@ pub struct QrCode {
 }
 impl QrCode {
     /// Generates a [QrCode] with the default settings.
+    /// 
+    /// # Errors
+    /// 
+    /// If the provided version number is out of range
     pub fn new<S: Into<String>>(data: S) -> Result<QrCode, CreateQrError> {
         QrCode::with_config(&QrConfiguration::new(data))
     }
     /// Generates a [QrCode] with the provided settings.
+    /// 
+    /// # Errors
+    /// 
+    /// If the provided version number is out of range.
     pub fn with_config(data: &QrConfiguration) -> Result<QrCode, CreateQrError> {
         // Every public path comes through here, so this is the one place settings are checked.
         data.version.validate()?;
@@ -379,11 +401,13 @@ impl QrConfiguration {
     /// # Errors
     ///
     /// If the text doesn't fit the requested version (or any version in the case of
-    /// [`QrVersion::Auto`](QrVersionSetting::Auto)).
+    /// [QrVersionSetting::Auto](QrVersionSetting::Auto)).
     ///
     /// If the data contains characters the requested encoding mode can't represent.
     ///
     /// If the requested mode isn't available.
+    /// 
+    /// If the provided version is out of range.
     pub fn build(&self) -> Result<QrCode, CreateQrError> {
         QrCode::with_config(self)
     }
