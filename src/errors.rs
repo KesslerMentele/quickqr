@@ -25,7 +25,7 @@ pub enum EncodeDataError {
     /// The provided bit length is invalid.
     InvalidBitLength(usize),
     /// The requested encoding mode has not been implemented.
-    NotImplemented
+    NotImplemented(EncodingMode)
 }
 impl std::error::Error for EncodeDataError {}
 impl fmt::Display for EncodeDataError {
@@ -46,8 +46,8 @@ impl fmt::Display for EncodeDataError {
             EncodeDataError::BitsWouldOverflow { bit_length: val, bits_left: size } => {
                 write!(f, "value larger than bits length: {} does not fit in {}", val, size)
             }
-            EncodeDataError::NotImplemented => {
-                write!(f, "not implemented")
+            EncodeDataError::NotImplemented(mode) => {
+                write!(f, "not implemented: {}", mode)
             }
         }
     }

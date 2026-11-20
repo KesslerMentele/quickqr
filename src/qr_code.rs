@@ -61,6 +61,7 @@ impl TryFrom<u8> for QrVersionSetting {
 /// Defaults to [EncodingMode::Auto]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub enum EncodingMode {
     /// The numeric encoding mode, for data that consists of only digits 0-9
     Numeric,
@@ -244,17 +245,17 @@ pub struct QrCode {
 }
 impl QrCode {
     /// Generates a [QrCode] with the default settings.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// If the provided version number is out of range
     pub fn new<S: Into<String>>(data: S) -> Result<QrCode, CreateQrError> {
         QrCode::with_config(&QrConfiguration::new(data))
     }
     /// Generates a [QrCode] with the provided settings.
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// If the provided version number is out of range.
     pub fn with_config(data: &QrConfiguration) -> Result<QrCode, CreateQrError> {
         // Every public path comes through here, so this is the one place settings are checked.
@@ -406,7 +407,7 @@ impl QrConfiguration {
     /// If the data contains characters the requested encoding mode can't represent.
     ///
     /// If the requested mode isn't available.
-    /// 
+    ///
     /// If the provided version is out of range.
     pub fn build(&self) -> Result<QrCode, CreateQrError> {
         QrCode::with_config(self)

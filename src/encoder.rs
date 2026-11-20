@@ -345,8 +345,8 @@ pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitV
         EncodingMode::Kanji => {
             Ok(encode_kanji(data)?)
         }
-        _ => {
-            Err(EncodeDataError::NotImplemented)
+        mode => {
+            Err(EncodeDataError::NotImplemented(mode))
         }
     }
 }
