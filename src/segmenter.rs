@@ -5,7 +5,7 @@ use crate::encoder::alphanumeric_value;
 #[cfg(feature = "kanji")]
 use crate::encoder::shift_jis_kanji;
 pub(crate) use crate::errors::CreateSegmentError;
-use crate::qr_code::{ErrorCorrectionLevel, QrVersion};
+use crate::qr_code::{ErrorCorrectionLevel, QrVersionSetting};
 
 /// The data modes that take part in segmentation.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Default, Copy)]
@@ -301,13 +301,13 @@ pub(crate) fn best_single_mode(data: &str) -> SegmentMode {
         .expect("Byte mode encodes every char, so some mode always qualifies")
 }
 
-/// Splits `data` into segments, choosing the version per [choice](QrVersion).
+/// Splits `data` into segments, choosing the version per [choice](QrVersionSetting).
 ///
 /// # Errors
-/// If the data exceeds the provided [`QrVersion`]'s bit capacity.
+/// If the data exceeds the provided [`QrVersionSetting`]'s bit capacity.
 ///
-/// If the data exceeds even the largest [`QrVersion`]'s bit capacity.
-pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: ErrorCorrectionLevel, ) -> Result<SegmentPlan, CreateSegmentError> {
+/// If the data exceeds even the largest [`QrVersionSetting`]'s bit capacity.
+pub(crate) fn segment(data: &str, choice: QrVersionSetting, error_correction_level: ErrorCorrectionLevel, ) -> Result<SegmentPlan, CreateSegmentError> {
     // `choose_version` stops at the group it picks, so the last segmentation computed is that
     // group's.
     let mut segments = Vec::new();
@@ -324,16 +324,16 @@ pub(crate) fn segment(data: &str, choice: QrVersion, error_correction_level: Err
 /// at the first one with a version that fits.
 ///
 /// # Errors
-/// If the data exceeds the provided [`QrVersion`]'s bit capacity.
+/// If the data exceeds the provided [`QrVersionSetting`]'s bit capacity.
 ///
-/// If the data exceeds even the largest [`QrVersion`]'s bit capacity.
+/// If the data exceeds even the largest [`QrVersionSetting`]'s bit capacity.
 pub(crate) fn choose_version(
-    choice: QrVersion,
+    choice: QrVersionSetting,
     error_correction_level: ErrorCorrectionLevel,
     mut bits_for: impl FnMut(VersionGroup) -> usize,
 ) -> Result<(u8, usize), CreateSegmentError> {
     match choice {
-        QrVersion::Exact(version) => {
+        QrVersionSetting::Exact(version) => {
             let needed_bits = bits_for(VersionGroup::of(version));
             let capacity_bits = data_capacity_bits(version, error_correction_level);
             if needed_bits > capacity_bits {
@@ -341,7 +341,7 @@ pub(crate) fn choose_version(
             }
             Ok((version, needed_bits))
         }
-        QrVersion::Auto => {
+        QrVersionSetting::Auto => {
             let mut needed_bits = 0;
             for group in VersionGroup::ALL {
                 needed_bits = bits_for(group);
@@ -474,12 +474,12 @@ mod tests {
     #[test]
     fn auto_picks_the_smallest_fitting_version() {
         // 41 bits fits version 1-M (128 bits).
-        let plan = segment("01234567", QrVersion::Auto, ErrorCorrectionLevel::M).unwrap();
+        let plan = segment("01234567", QrVersionSetting::Auto, ErrorCorrectionLevel::M).unwrap();
         assert_eq!(plan.version, 1);
         assert_eq!(plan.data_bits_length, 41);
 
         // 20 bytes is 172 bits: too many for 1-L (152), enough for 2-L (272).
-        let plan = segment(&"a".repeat(20), QrVersion::Auto, ErrorCorrectionLevel::L).unwrap();
+        let plan = segment(&"a".repeat(20), QrVersionSetting::Auto, ErrorCorrectionLevel::L).unwrap();
         assert_eq!(plan.version, 2);
     }
 
@@ -487,7 +487,7 @@ mod tests {
     fn auto_moves_to_the_next_version_group() {
         // 300 bytes overflows 9-L (1856 bits); at 16-bit counts it's 2420 bits, past 10-L (2192)
         // but within 11-L (2592).
-        let plan = segment(&"a".repeat(300), QrVersion::Auto, ErrorCorrectionLevel::L).unwrap();
+        let plan = segment(&"a".repeat(300), QrVersionSetting::Auto, ErrorCorrectionLevel::L).unwrap();
         assert_eq!(plan.version, 11);
         assert_eq!(plan.data_bits_length, 2420);
     }
@@ -496,14 +496,14 @@ mod tests {
     fn auto_rejects_data_too_long_for_version_40() {
         // 4 + 16 + 3000 * 8 = 24020 bits, against 40-L's 23648.
         assert_eq!(
-            segment(&"a".repeat(3000), QrVersion::Auto, ErrorCorrectionLevel::L),
+            segment(&"a".repeat(3000), QrVersionSetting::Auto, ErrorCorrectionLevel::L),
             Err(CreateSegmentError::TooLong { needed_bits: 24020 })
         );
     }
 
     #[test]
     fn fixed_uses_the_requested_version() {
-        let plan = segment("01234567", QrVersion::Exact(5), ErrorCorrectionLevel::H).unwrap();
+        let plan = segment("01234567", QrVersionSetting::Exact(5), ErrorCorrectionLevel::H).unwrap();
         assert_eq!(plan.version, 5);
         assert_eq!(plan.segments, vec![seg(SegmentMode::Numeric, 0..8)]);
     }
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn fixed_rejects_data_that_does_not_fit() {
         assert_eq!(
-            segment(&"a".repeat(20), QrVersion::Exact(1), ErrorCorrectionLevel::L),
+            segment(&"a".repeat(20), QrVersionSetting::Exact(1), ErrorCorrectionLevel::L),
             Err(CreateSegmentError::ExceedsVersionCapacity { needed_bits: 172, capacity_bits: 152 })
         );
     }

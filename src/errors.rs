@@ -9,9 +9,9 @@ pub enum EncodeDataError {
     /// A double-byte Shift-JIS code point outside the two ranges QR Kanji mode can represent.
     KanjiOutOfRange(u16),
     /// The value in bits does not fit in the provided amount of bits.
-    BitsWouldOverflow(u32, usize),
+    BitsWouldOverflow {bit_length: u32, bits_left: usize},
     /// The codeword count of the data does not match the expected value
-    InvalidByteCount(usize, usize),
+    InvalidByteCount {actual_count: usize, expected_count: usize},
     /// The provided bit length is invalid.
     InvalidBitLength(usize),
     /// The requested encoding mode has not been implemented.
@@ -22,22 +22,22 @@ impl fmt::Display for EncodeDataError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             EncodeDataError::InvalidChar(char) => {
-                write!(f, "Invalid character '{}'", char)
+                write!(f, "invalid character '{}'", char)
             }
             EncodeDataError::KanjiOutOfRange(val) => {
-                write!(f, "Kanji out of range: {}", val)
+                write!(f, "kanji out of range: {}", val)
             }
             EncodeDataError::InvalidBitLength(val) => {
-                write!(f, "Invalid bits length: {}", val)
+                write!(f, "invalid bits length: {}", val)
             }
-            EncodeDataError::InvalidByteCount(val, len) => {
-                write!(f, "Invalid byte count: {} (expected {})", val, len)
+            EncodeDataError::InvalidByteCount { actual_count: val, expected_count: len } => {
+                write!(f, "invalid byte count: {} (expected {})", val, len)
             }
-            EncodeDataError::BitsWouldOverflow(val, size) => {
-                write!(f, "Value larger than bits length: {} does not fit in {}", val, size)
+            EncodeDataError::BitsWouldOverflow { bit_length: val, bits_left: size } => {
+                write!(f, "value larger than bits length: {} does not fit in {}", val, size)
             }
             EncodeDataError::NotImplemented => {
-                write!(f, "Not implemented")
+                write!(f, "not implemented")
             }
         }
     }
@@ -52,7 +52,7 @@ pub enum VersionError {
 impl std::error::Error for VersionError {}
 impl fmt::Display for VersionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self { VersionError::OutOfBounds(version) => {write!(f, "QR version out of bounds: {}", version)} }
+        match self { VersionError::OutOfBounds(version) => {write!(f, "qr version out of bounds: {}", version)} }
     }
 }
 
@@ -153,12 +153,18 @@ impl fmt::Display for DecodeDataError {
 /// The possible errors encountered during QR code generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CreateQrError {
+    /// The requested QR Version is not valid
     InvalidQrVersion(VersionError),
+    /// The requested data is not segmentable
     NotSegmentable(CreateSegmentError),
+    /// The requested encoding mode is not implemented
     NotImplemented(EncodingMode),
+    /// Failed to encode the data
     EncodingFailed(EncodeDataError),
+    /// Failed to apply the mask
     MaskingFailed(ApplyMaskError),
-    FeatureNotEnabled(&'static str)
+    /// The requested encoding mode is not enabled
+    FeatureNotEnabled(EncodingMode)
 }
 impl std::error::Error for CreateQrError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { match self {

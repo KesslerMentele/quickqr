@@ -7,7 +7,7 @@
 mod qr_code;
 mod errors;
 mod segmenter;
-pub mod structure;
+mod structure;
 mod penalty_score;
 mod gf_math;
 mod encoder;
@@ -26,5 +26,5 @@ pub use {
 
 pub use qr_code::{
     EncodingMode, ErrorCorrectionLevel, MaskSetting,
-    QrCode, QrConfiguration, QrStats, QrVersion, SegmentStats,
+    QrCode, QrConfiguration, QrStats, QrVersionSetting, SegmentStats,
 };

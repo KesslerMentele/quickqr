@@ -1,39 +1,59 @@
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use bitvec::prelude::*;
 use std::ops::RangeInclusive;
 use crate::bits::bytes_to_bits;
 use crate::blocks::interleave;
 use crate::EncodeDataError;
 use crate::encoder::{apply_formatting, encode_data_by_encoding_plan, encode_single_segment};
-pub(crate) use crate::errors::{CreateQrError, VersionError};
+pub(crate) use crate::errors::{ApplyMaskError, CreateQrError, VersionError};
 use crate::segmenter::{segment, SegmentMode, best_single_mode};
 use crate::structure::QrMatrix;
 
 
 /// The symbol versions QR codes come in.
-const VERSIONS: RangeInclusive<u8> = 1..=40;
+pub(crate) const VERSIONS: RangeInclusive<u8> = 1..=40;
 
-/// The versions that can be used to create a QR code. Either [`Auto`](QrVersion::Auto) or a value from 1-40.
-/// Defaults to [QrVersion::Auto]
+/// The versions that can be used to create a QR code. Either [`Auto`](QrVersionSetting::Auto) or a value from 1-40.
+/// Defaults to [QrVersionSetting::Auto]
+///
+/// `Exact` accepts any `u8`; values outside 1-40 are rejected when the code is built, with
+/// [`CreateQrError::InvalidQrVersion`]. Use [`QrVersionSetting::try_from`] to check earlier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum QrVersion {
+pub enum QrVersionSetting {
+    /// The smallest version the data fits in.
     #[default]
     Auto,
+    /// A specific version, 1-40.
     Exact(u8),
 }
-impl fmt::Display for QrVersion {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl QrVersionSetting {
+    /// Rejects an `Exact` version outside 1-40.
+    fn validate(self) -> Result<(), VersionError> {
         match self {
-            QrVersion::Auto => { write!(f, "auto") }
-            QrVersion::Exact(version) => {write!(f, "version {}", version)}
+            QrVersionSetting::Exact(version) if !VERSIONS.contains(&version) => Err(VersionError::OutOfBounds(version)),
+            _ => Ok(()),
         }
     }
 }
-impl TryFrom<u8> for QrVersion {
+impl Display for QrVersionSetting {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            QrVersionSetting::Auto => { write!(f, "auto") }
+            QrVersionSetting::Exact(version) => {write!(f, "version {}", version)}
+        }
+    }
+}
+impl TryFrom<u8> for QrVersionSetting {
     type Error = VersionError;
 
+    /// # Errors
+    ///
+    /// [`VersionError::OutOfBounds`] if `value` is outside 1-40.
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if VERSIONS.contains(&value) {Ok(QrVersion::Exact(value))} else {Err(VersionError::OutOfBounds(value)) }
+        let setting = QrVersionSetting::Exact(value);
+        setting.validate()?;
+        Ok(setting)
     }
 }
 
@@ -67,15 +87,15 @@ impl TryFrom<SegmentMode> for EncodingMode {
                     Ok(EncodingMode::Kanji)
 
                 } else {
-                    Err(CreateQrError::FeatureNotEnabled("kanji"))
+                    Err(CreateQrError::FeatureNotEnabled(EncodingMode::Kanji))
                 }
 
             }
         }
     }
 }
-impl fmt::Display for EncodingMode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for EncodingMode {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -91,8 +111,8 @@ pub enum ErrorCorrectionLevel {
     Q,
     H
 }
- impl fmt::Display for ErrorCorrectionLevel {
-     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+ impl Display for ErrorCorrectionLevel {
+     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
          write!(f, "{:?}", self)
      }
  }
@@ -105,8 +125,8 @@ pub(crate) struct EncodedData {
     /// Where each segment landed in `bits`, in order.
     pub(crate) segments: Vec<SegmentStats>,
 }
-impl fmt::Display for EncodedData {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for EncodedData {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "version: {}, bits: {:?}, segments: {:?}", self.version, self.bits, self.segments )
     }
 }
@@ -147,8 +167,8 @@ impl SegmentStats {
         self.header_bits
     }
 }
-impl fmt::Display for SegmentStats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for SegmentStats {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "mode:{}, start:{}, end:{}, header:{}", self.mode, self.start_bit, self.end_bit, self.header_bits)
     }
 }
@@ -189,8 +209,8 @@ impl QrStats {
         &self.segments
     }
 }
-impl fmt::Display for QrStats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for QrStats {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "version: {}, error correction level: {}, mask: {},encoding modes: {:?}, segments: {:?}",
                self.version, self.error_correction_level, self.mask, self.encoding_modes, self.segments
         )
@@ -198,8 +218,12 @@ impl fmt::Display for QrStats {
 }
 
 /// A finished QR code symbol. Holds the [`matrix`](QrMatrix) and [`stats`](QrStats) for the code.
+///
+/// With the `serde` feature, the modules serialize as one hex string: the symbol read row by
+/// row from the top-left, most significant bit first, `1` for dark, zero-padded to a whole byte.
+/// Binary formats get the same bytes raw. Deserializing redraws everything except the data
+/// modules from the version, level and mask, and rejects input that doesn't match.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct QrCode {
     pub(crate) matrix: QrMatrix,
     stats: QrStats,
@@ -211,9 +235,12 @@ impl QrCode {
     }
     /// Generates a [QrCode] with the provided settings.
     pub fn with_config(data: &QrConfiguration) -> Result<QrCode, CreateQrError> {
+        // Every public path comes through here, so this is the one place settings are checked.
+        data.version.validate()?;
+        data.mask.validate().map_err(CreateQrError::MaskingFailed)?;
         let encoded_data = create_qr_code_bits(data)?;
         let segments = encoded_data.segments.clone();
-        let mut matrix = QrMatrix::new(encoded_data.version, data.error_correction_level);
+        let mut matrix = QrMatrix::new(encoded_data.version, data.error_correction_level)?;
         let error_corrected_data = create_error_corrected_data(encoded_data, data.error_correction_level)?;
         matrix.place_data(&error_corrected_data);
         matrix.set_mask(data.mask).map_err(CreateQrError::MaskingFailed)?;
@@ -249,27 +276,40 @@ impl QrCode {
         &self.stats
     }
 }
-impl fmt::Display for QrCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for QrCode {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "matrix: {}, stats: {}", self.matrix, self.stats)
     }
 }
 
 
 /// The eight mask patterns.
-#[cfg(feature = "serde")]
 const MASK_PATTERNS: RangeInclusive<u8> = 0..=7;
 
 /// The mask patterns for creating a QR code.
 /// Defaults to [MaskSetting::Auto]
+///
+/// `Exact` accepts any `u8`; values outside 0-7 are rejected when the code is built, with
+/// [`CreateQrError::MaskingFailed`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum MaskSetting {
+    /// The pattern with the lowest penalty score.
     #[default]
     Auto,
+    /// A specific pattern, 0-7.
     Exact(u8),
 }
-impl fmt::Display for MaskSetting {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl MaskSetting {
+    /// Rejects an `Exact` pattern outside 0-7.
+    fn validate(self) -> Result<(), ApplyMaskError> {
+        match self {
+            MaskSetting::Exact(pattern) if !MASK_PATTERNS.contains(&pattern) => Err(ApplyMaskError::InvalidMaskVersion(pattern)),
+            _ => Ok(()),
+        }
+    }
+}
+impl Display for MaskSetting {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             MaskSetting::Auto => {
                 write!(f, "auto")
@@ -289,7 +329,7 @@ pub struct QrConfiguration {
     pub(crate) text: String,
     pub(crate) error_correction_level: ErrorCorrectionLevel,
     pub(crate) encoding_mode: EncodingMode,
-    pub(crate) version: QrVersion,
+    pub(crate) version: QrVersionSetting,
     pub(crate) mask: MaskSetting
 }
 impl QrConfiguration {
@@ -299,14 +339,14 @@ impl QrConfiguration {
             text: text.into(),
             error_correction_level: ErrorCorrectionLevel::default(),
             encoding_mode: EncodingMode::default(),
-            version: QrVersion::default(),
+            version: QrVersionSetting::default(),
             mask: MaskSetting::default(),
         }
     }
 
     /// Every setting at once.
     #[cfg(test)]
-    pub(crate) fn from_parts(text: &str, error_correction_level: ErrorCorrectionLevel, encoding_mode: EncodingMode, version: QrVersion, mask: MaskSetting) -> QrConfiguration {
+    pub(crate) fn from_parts(text: &str, error_correction_level: ErrorCorrectionLevel, encoding_mode: EncodingMode, version: QrVersionSetting, mask: MaskSetting) -> QrConfiguration {
         QrConfiguration { text: text.into(), error_correction_level, encoding_mode, version, mask }
     }
 
@@ -323,7 +363,7 @@ impl QrConfiguration {
     }
 
     /// The symbol version, which sets the code's size.
-    pub fn version(mut self, version: QrVersion) -> Self {
+    pub fn version(mut self, version: QrVersionSetting) -> Self {
         self.version = version;
         self
     }
@@ -339,7 +379,7 @@ impl QrConfiguration {
     /// # Errors
     ///
     /// If the text doesn't fit the requested version (or any version in the case of
-    /// [`QrVersion::Auto`](QrVersion::Auto)).
+    /// [`QrVersion::Auto`](QrVersionSetting::Auto)).
     ///
     /// If the data contains characters the requested encoding mode can't represent.
     ///
@@ -348,8 +388,8 @@ impl QrConfiguration {
         QrCode::with_config(self)
     }
 }
-impl fmt::Display for QrConfiguration {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for QrConfiguration {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "text:{}, error correction level: {}, encoding mode: {}, version: {}, mask: {}",
                self.text, self.error_correction_level, self.encoding_mode, self.version, self.mask
         )
@@ -357,13 +397,14 @@ impl fmt::Display for QrConfiguration {
 }
 
 /// Serde support for settings that are either `Auto` or a number in a fixed range, as
-/// [`QrVersion`] and [`MaskSetting`] are.
+/// [`QrVersionSetting`] and [`MaskSetting`] are.
 #[cfg(feature = "serde")]
 mod auto_or_number {
     use std::{fmt, ops::RangeInclusive};
+    use std::fmt::Formatter;
     use serde::de::{self, Unexpected, Visitor};
     use serde::{Deserializer, Serializer};
-    use super::{MaskSetting, QrVersion, MASK_PATTERNS, VERSIONS};
+    use super::{MaskSetting, QrVersionSetting, MASK_PATTERNS, VERSIONS};
 
     const AUTO: &str = "Auto";
 
@@ -399,7 +440,7 @@ mod auto_or_number {
     impl<'de> Visitor<'de> for AutoOrNumber {
         type Value = Option<u8>;
 
-        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn expecting(&self, f: &mut Formatter) -> fmt::Result {
             write!(f, "\"{AUTO}\" or a {} from {} to {}", self.what, self.range.start(), self.range.end())
         }
 
@@ -423,15 +464,16 @@ mod auto_or_number {
         }
     }
 
-    impl serde::Serialize for QrVersion {
+
+    impl serde::Serialize for QrVersionSetting {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serialize(match self { QrVersion::Auto => None, QrVersion::Exact(version) => Some(*version) }, serializer)
+            serialize(match self { QrVersionSetting::Auto => None, QrVersionSetting::Exact(version) => Some(*version) }, serializer)
         }
     }
 
-    impl<'de> serde::Deserialize<'de> for QrVersion {
+    impl<'de> serde::Deserialize<'de> for QrVersionSetting {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            Ok(deserialize(deserializer, "QR version", VERSIONS)?.map_or(QrVersion::Auto, QrVersion::Exact))
+            Ok(deserialize(deserializer, "QR version", VERSIONS)?.map_or(QrVersionSetting::Auto, QrVersionSetting::Exact))
         }
     }
 
@@ -444,6 +486,159 @@ mod auto_or_number {
     impl<'de> serde::Deserialize<'de> for MaskSetting {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             Ok(deserialize(deserializer, "mask pattern", MASK_PATTERNS)?.map_or(MaskSetting::Auto, MaskSetting::Exact))
+        }
+    }
+}
+
+/// Serde support for [`QrCode`]: the modules travel as one big number (hex, or raw bytes for
+/// binary formats), and everything that can be redrawn from the version, level and mask is
+/// checked rather than trusted.
+#[cfg(feature = "serde")]
+mod qr_code_serde {
+    use bitvec::prelude::*;
+    use serde::de::Error as _;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use crate::structure::QrMatrix;
+    use super::{ErrorCorrectionLevel, QrCode, QrStats, SegmentStats, VERSIONS};
+
+    /// What a [`QrCode`] looks like serialized.
+    #[derive(Serialize, Deserialize)]
+    struct QrCodeRepr {
+        version: u8,
+        error_correction_level: ErrorCorrectionLevel,
+        mask: u8,
+        /// Row-major from the top-left, most significant bit first, `1` dark, zero-padded to a
+        /// whole byte.
+        #[serde(with = "packed_modules")]
+        modules: BitVec<u8, Msb0>,
+        segments: Vec<SegmentStats>,
+    }
+
+    impl Serialize for QrCode {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut modules: BitVec<u8, Msb0> = self.matrix.modules().iter().by_vals().collect();
+            // The padding bits in the last byte are otherwise unspecified.
+            modules.set_uninitialized(false);
+            QrCodeRepr {
+                version: self.stats.version,
+                error_correction_level: self.stats.error_correction_level,
+                mask: self.stats.mask,
+                modules,
+                segments: self.stats.segments.clone(),
+            }.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for QrCode {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let repr = QrCodeRepr::deserialize(deserializer)?;
+            if !VERSIONS.contains(&repr.version) {
+                return Err(D::Error::custom(format_args!("QR version {} is outside 1-40", repr.version)));
+            }
+
+            let size = repr.version as usize * 4 + 17;
+            let bit_count = size * size;
+            let mut bits = repr.modules;
+            if bits.len() != bit_count.div_ceil(8) * 8 {
+                return Err(D::Error::custom(format_args!(
+                    "expected {} bytes of modules for version {}, got {}", bit_count.div_ceil(8), repr.version, bits.len() / 8
+                )));
+            }
+            if bits[bit_count..].any() {
+                return Err(D::Error::custom("padding bits after the last module must be zero"));
+            }
+            bits.truncate(bit_count);
+            let modules: BitVec<u8, Lsb0> = bits.iter().by_vals().collect();
+
+            let matrix = QrMatrix::from_modules(repr.version, repr.error_correction_level, repr.mask, &modules)
+                .ok_or_else(|| D::Error::custom("modules don't form a valid symbol for this version, error correction level and mask"))?;
+
+            // Segments must tile the data stream from bit 0, in order, each at least as long as
+            // its header. (Whether they describe the data modules can't be checked without decoding.)
+            let mut position = 0;
+            for segment in &repr.segments {
+                if segment.start_bit != position
+                    || segment.end_bit < segment.start_bit
+                    || segment.header_bits > segment.end_bit - segment.start_bit {
+                    return Err(D::Error::custom("segments must be contiguous from bit 0 and at least as long as their headers"));
+                }
+                position = segment.end_bit;
+            }
+
+            Ok(QrCode {
+                matrix,
+                stats: QrStats {
+                    version: repr.version,
+                    error_correction_level: repr.error_correction_level,
+                    mask: repr.mask,
+                    encoding_modes: repr.segments.iter().map(|segment| segment.mode).collect(),
+                    segments: repr.segments,
+                },
+            })
+        }
+    }
+
+    /// The modules as one big number: a lowercase hex string for human-readable formats, raw
+    /// bytes for binary ones.
+    mod packed_modules {
+        use std::fmt;
+        use bitvec::prelude::*;
+        use serde::de::{self, SeqAccess, Visitor};
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub(super) fn serialize<S: Serializer>(bits: &BitVec<u8, Msb0>, serializer: S) -> Result<S::Ok, S::Error> {
+            let bytes = bits.as_raw_slice();
+            if serializer.is_human_readable() {
+                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+                serializer.serialize_str(&hex)
+            } else {
+                serializer.serialize_bytes(bytes)
+            }
+        }
+
+        pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BitVec<u8, Msb0>, D::Error> {
+            let bytes = if deserializer.is_human_readable() {
+                from_hex(&String::deserialize(deserializer)?)
+                    .ok_or_else(|| de::Error::custom("modules must be an even number of hex digits"))?
+            } else {
+                deserializer.deserialize_bytes(Bytes)?
+            };
+            Ok(BitVec::from_vec(bytes))
+        }
+
+        fn from_hex(hex: &str) -> Option<Vec<u8>> {
+            let digit = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+            if hex.len() % 2 != 0 {
+                return None;
+            }
+            hex.as_bytes().chunks_exact(2).map(|pair| Some(digit(pair[0])? << 4 | digit(pair[1])?)).collect()
+        }
+
+        /// Takes bytes however the format hands them over.
+        struct Bytes;
+
+        impl<'de> Visitor<'de> for Bytes {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "the modules as bytes")
+            }
+
+            fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                Ok(v.to_vec())
+            }
+
+            fn visit_byte_buf<E: de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                Ok(v)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut bytes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(bytes)
+            }
         }
     }
 }
@@ -499,7 +694,7 @@ mod tests {
     use crate::errors::{CreateSegmentError, EncodeDataError};
     use super::*;
 
-    fn v(version: u8) -> QrVersion { QrVersion::Exact(version) }
+    fn v(version: u8) -> QrVersionSetting { QrVersionSetting::Exact(version) }
 
     /// Builds an expected bitstream from `(value, bit_length)` fields, in order.
     fn fields(fields: &[(u32, usize)]) -> BitVec<u8, Lsb0> {
@@ -525,15 +720,15 @@ mod tests {
             (0b0100, 4), (1, 8), (b'a' as u32, 8),
             (0b0001, 4), (7, 10), (123, 10), (456, 10), (7, 4),
         ]);
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts("a1234567", ErrorCorrectionLevel::L, EncodingMode::Segmented, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("a1234567", ErrorCorrectionLevel::L, EncodingMode::Segmented, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert_eq!(bits, expected);
     }
 
     #[test]
     fn segmented_length_matches_the_segment_plan() {
         for data in ["01234567", "a1234567", "AB1234567", "é1234567", "点点abc", "HELLO WORLD 123"] {
-            let plan = segment(data, QrVersion::Auto, ErrorCorrectionLevel::M).unwrap();
-            let bits = create_qr_code_bits(&QrConfiguration::from_parts(data, ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Auto, MaskSetting::Auto )).unwrap().bits;
+            let plan = segment(data, QrVersionSetting::Auto, ErrorCorrectionLevel::M).unwrap();
+            let bits = create_qr_code_bits(&QrConfiguration::from_parts(data, ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersionSetting::Auto, MaskSetting::Auto )).unwrap().bits;
             assert_eq!(bits.len(), plan.data_bits_length, "length mismatch for {data:?}");
         }
     }
@@ -556,7 +751,7 @@ mod tests {
     fn auto_detect_matches_the_iso_18004_alphanumeric_example() {
         // ISO/IEC 18004 Annex I: "AC-42" is mode 0010, count 5 in 9 bits, then data.
         let expected = fields(&[(0b0010, 4), (5, 9), (10 * 45 + 12, 11), (41 * 45 + 4, 11), (2, 6)]);
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts("AC-42", ErrorCorrectionLevel::M, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("AC-42", ErrorCorrectionLevel::M, EncodingMode::Auto, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert_eq!(bits, expected);
     }
 
@@ -565,7 +760,7 @@ mod tests {
     fn kanji_count_indicator_counts_chars_not_bytes() {
         // 点 is 3 UTF-8 bytes, but the count is 1 char. Data is 0x935F reduced to 0x0D9F.
         let expected = fields(&[(0b1000, 4), (1, 8), (0x0D9F, 13)]);
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts("点", ErrorCorrectionLevel::M, EncodingMode::Kanji, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("点", ErrorCorrectionLevel::M, EncodingMode::Kanji, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert_eq!(bits, expected);
     }
 
@@ -573,7 +768,7 @@ mod tests {
     fn byte_count_indicator_counts_utf8_bytes() {
         // é is 2 UTF-8 bytes: 0xC3 0xA9.
         let expected = fields(&[(0b0100, 4), (2, 8), (0xC3, 8), (0xA9, 8)]);
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts("é", ErrorCorrectionLevel::M, EncodingMode::Byte, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("é", ErrorCorrectionLevel::M, EncodingMode::Byte, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert_eq!(bits, expected);
     }
 
@@ -586,39 +781,39 @@ mod tests {
     #[test]
     fn auto_detect_widens_the_count_in_a_larger_version_group() {
         // 300 bytes overflows every Small version at L, so the count indicator is 16 bits.
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts(&"a".repeat(300), ErrorCorrectionLevel::L, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts(&"a".repeat(300), ErrorCorrectionLevel::L, EncodingMode::Auto, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert_eq!(bits.len(), 4 + 16 + 300 * 8);
         assert_eq!(bits[..20], fields(&[(0b0100, 4), (300, 16)])[..]);
     }
 
     #[test]
     fn auto_detect_rejects_data_too_long_for_version_40() {
-        let result = create_qr_code_bits(&QrConfiguration::from_parts(&"a".repeat(3000), ErrorCorrectionLevel::L, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto));
+        let result = create_qr_code_bits(&QrConfiguration::from_parts(&"a".repeat(3000), ErrorCorrectionLevel::L, EncodingMode::Auto, QrVersionSetting::Auto, MaskSetting::Auto));
         assert!(matches!(result, Err(CreateQrError::NotSegmentable(CreateSegmentError::TooLong { needed_bits: 24020 }))));
     }
 
     #[test]
     fn fixed_mode_rejects_chars_outside_its_set() {
-        let result = create_qr_code_bits(&QrConfiguration::from_parts("12a", ErrorCorrectionLevel::M, EncodingMode::Numeric, QrVersion::Auto, MaskSetting::Auto));
+        let result = create_qr_code_bits(&QrConfiguration::from_parts("12a", ErrorCorrectionLevel::M, EncodingMode::Numeric, QrVersionSetting::Auto, MaskSetting::Auto));
         assert!(matches!(result, Err(CreateQrError::EncodingFailed(EncodeDataError::InvalidChar('a')))));
     }
 
     #[test]
     fn prefix_modes_are_not_implemented() {
         for mode in [EncodingMode::Eci, EncodingMode::Fnc1, EncodingMode::StructuredAppend] {
-            let result = create_qr_code_bits(&QrConfiguration::from_parts("1", ErrorCorrectionLevel::M, mode, QrVersion::Auto, MaskSetting::Auto));
+            let result = create_qr_code_bits(&QrConfiguration::from_parts("1", ErrorCorrectionLevel::M, mode, QrVersionSetting::Auto, MaskSetting::Auto));
             assert!(matches!(result, Err(CreateQrError::NotImplemented(_))));
         }
     }
 
     #[test]
     fn segmented_empty_input_is_empty() {
-        let bits = create_qr_code_bits(&QrConfiguration::from_parts("", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Auto, MaskSetting::Auto)).unwrap().bits;
+        let bits = create_qr_code_bits(&QrConfiguration::from_parts("", ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap().bits;
         assert!(bits.is_empty());
     }
 
     fn stats(text: &str, encoding_mode: EncodingMode, mask: MaskSetting) -> QrStats {
-        QrCode::with_config(&QrConfiguration::from_parts(text, ErrorCorrectionLevel::Q, encoding_mode, QrVersion::Auto, mask)).unwrap().stats
+        QrCode::with_config(&QrConfiguration::from_parts(text, ErrorCorrectionLevel::Q, encoding_mode, QrVersionSetting::Auto, mask)).unwrap().stats
     }
 
     #[test]
@@ -672,7 +867,7 @@ mod tests {
     #[test]
     fn segments_cover_the_encoded_bits_end_to_end() {
         for text in ["01234567", "a1234567", "AB1234567", "é1234567", "HELLO WORLD 123"] {
-            let data = QrConfiguration::from_parts(text, ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersion::Auto, MaskSetting::Auto);
+            let data = QrConfiguration::from_parts(text, ErrorCorrectionLevel::M, EncodingMode::Segmented, QrVersionSetting::Auto, MaskSetting::Auto);
             let encoded = create_qr_code_bits(&data).unwrap();
 
             let mut position = 0;
@@ -687,7 +882,7 @@ mod tests {
 
     #[test]
     fn segment_offsets_point_at_each_segments_mode_indicator() {
-        let data = QrConfiguration::from_parts("a1234567", ErrorCorrectionLevel::L, EncodingMode::Segmented, QrVersion::Auto, MaskSetting::Auto);
+        let data = QrConfiguration::from_parts("a1234567", ErrorCorrectionLevel::L, EncodingMode::Segmented, QrVersionSetting::Auto, MaskSetting::Auto);
         let encoded = create_qr_code_bits(&data).unwrap();
         let indicators: Vec<&BitSlice<u8, Lsb0>> = encoded.segments.iter()
             .map(|segment| &encoded.bits[segment.start_bit..segment.start_bit + 4])
@@ -702,13 +897,35 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_versions_are_errors_not_panics() {
+        for version in [0, 41, u8::MAX] {
+            let result = QrConfiguration::new("HI").version(QrVersionSetting::Exact(version)).build();
+            assert_eq!(result, Err(CreateQrError::InvalidQrVersion(VersionError::OutOfBounds(version))));
+        }
+    }
+
+    #[test]
+    fn out_of_range_masks_are_rejected_before_encoding() {
+        let result = QrConfiguration::new("HI").mask(MaskSetting::Exact(8)).build();
+        assert_eq!(result, Err(CreateQrError::MaskingFailed(ApplyMaskError::InvalidMaskVersion(8))));
+    }
+
+    #[test]
+    fn try_from_checks_the_version_range() {
+        assert_eq!(QrVersionSetting::try_from(1), Ok(QrVersionSetting::Exact(1)));
+        assert_eq!(QrVersionSetting::try_from(40), Ok(QrVersionSetting::Exact(40)));
+        assert_eq!(QrVersionSetting::try_from(0), Err(VersionError::OutOfBounds(0)));
+        assert_eq!(QrVersionSetting::try_from(41), Err(VersionError::OutOfBounds(41)));
+    }
+
+    #[test]
     fn stats_report_the_requested_mask() {
         assert_eq!(stats("HELLO", EncodingMode::Auto, MaskSetting::Exact(3)).mask, 3);
     }
 
     #[test]
     fn stats_report_the_mask_auto_applied() {
-        let code = QrCode::with_config(&QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::Q, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto)).unwrap();
+        let code = QrCode::with_config(&QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::Q, EncodingMode::Auto, QrVersionSetting::Auto, MaskSetting::Auto)).unwrap();
         assert_eq!(Some(code.stats.mask), code.matrix.mask());
         assert!(code.stats.mask < 8);
     }
@@ -729,7 +946,7 @@ mod tests {
             ("line one\nline two", ErrorCorrectionLevel::M),
         ];
         for (original_string, level) in cases {
-            let matrix = QrCode::with_config(&QrConfiguration { text: original_string.into(), error_correction_level: level, encoding_mode: EncodingMode::Auto, version: QrVersion::Auto, mask: MaskSetting::Auto }).unwrap().matrix;
+            let matrix = QrCode::with_config(&QrConfiguration { text: original_string.into(), error_correction_level: level, encoding_mode: EncodingMode::Auto, version: QrVersionSetting::Auto, mask: MaskSetting::Auto }).unwrap().matrix;
             let decoded_string = decode_modules(matrix.modules())
                 .unwrap_or_else(|e| panic!("decode failed for {original_string:?} at {level:?}: {e:?}"));
 
@@ -739,12 +956,13 @@ mod tests {
 }
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
+    use std::fmt::Debug;
     use super::*;
     use serde::Deserialize;
     use serde::de::{value::Error as ValueError, IntoDeserializer};
 
     fn round_trip<T>(value: T)
-    where T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + fmt::Debug {
+    where T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + Debug {
         let json = serde_json::to_string(&value).unwrap();
         let back: T = serde_json::from_str(&json)
             .unwrap_or_else(|e| panic!("{value:?} serialized as {json} but didn't deserialize: {e}"));
@@ -753,9 +971,9 @@ mod serde_tests {
 
     #[test]
     fn version_round_trips() {
-        round_trip(QrVersion::Auto);
-        round_trip(QrVersion::Exact(1));
-        round_trip(QrVersion::Exact(40));
+        round_trip(QrVersionSetting::Auto);
+        round_trip(QrVersionSetting::Exact(1));
+        round_trip(QrVersionSetting::Exact(40));
     }
 
     #[test]
@@ -767,30 +985,30 @@ mod serde_tests {
 
     #[test]
     fn qr_data_round_trips() {
-        round_trip(QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::Q, EncodingMode::Auto, QrVersion::Exact(5), MaskSetting::Exact(3)));
-        round_trip(QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::M, EncodingMode::Auto, QrVersion::Auto, MaskSetting::Auto));
+        round_trip(QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::Q, EncodingMode::Auto, QrVersionSetting::Exact(5), MaskSetting::Exact(3)));
+        round_trip(QrConfiguration::from_parts("HELLO", ErrorCorrectionLevel::M, EncodingMode::Auto, QrVersionSetting::Auto, MaskSetting::Auto));
     }
 
     #[test]
     fn version_accepts_a_number_or_a_numeric_string() {
-        assert_eq!(serde_json::from_str::<QrVersion>("5").unwrap(), QrVersion::Exact(5));
-        assert_eq!(serde_json::from_str::<QrVersion>("\"5\"").unwrap(), QrVersion::Exact(5));
-        assert_eq!(serde_json::from_str::<QrVersion>("\"auto\"").unwrap(), QrVersion::Auto);
+        assert_eq!(serde_json::from_str::<QrVersionSetting>("5").unwrap(), QrVersionSetting::Exact(5));
+        assert_eq!(serde_json::from_str::<QrVersionSetting>("\"5\"").unwrap(), QrVersionSetting::Exact(5));
+        assert_eq!(serde_json::from_str::<QrVersionSetting>("\"auto\"").unwrap(), QrVersionSetting::Auto);
     }
 
     #[test]
     fn version_accepts_signed_integers() {
         // Formats like TOML hand every integer to serde as an i64.
         let deserializer: serde::de::value::I64Deserializer<ValueError> = 5i64.into_deserializer();
-        assert_eq!(QrVersion::deserialize(deserializer).unwrap(), QrVersion::Exact(5));
+        assert_eq!(QrVersionSetting::deserialize(deserializer).unwrap(), QrVersionSetting::Exact(5));
         let deserializer: serde::de::value::I64Deserializer<ValueError> = 41i64.into_deserializer();
-        assert!(QrVersion::deserialize(deserializer).is_err());
+        assert!(QrVersionSetting::deserialize(deserializer).is_err());
     }
 
     #[test]
     fn version_rejects_out_of_range_values() {
         for json in ["0", "41", "\"99\"", "-1", "\"five\""] {
-            assert!(serde_json::from_str::<QrVersion>(json).is_err(), "{json} should be rejected");
+            assert!(serde_json::from_str::<QrVersionSetting>(json).is_err(), "{json} should be rejected");
         }
     }
 
@@ -799,5 +1017,104 @@ mod serde_tests {
         for json in ["8", "\"8\"", "255"] {
             assert!(serde_json::from_str::<MaskSetting>(json).is_err(), "{json} should be rejected");
         }
+    }
+
+    fn code(text: &str, version: QrVersionSetting, mask: MaskSetting) -> QrCode {
+        QrConfiguration::new(text).version(version).mask(mask).encoding_mode(EncodingMode::Segmented).build().unwrap()
+    }
+
+    /// `HELLO` at version 1 as JSON, for tampering with.
+    fn hello_json() -> serde_json::Value {
+        serde_json::to_value(code("HELLO", QrVersionSetting::Exact(1), MaskSetting::Exact(2))).unwrap()
+    }
+
+    fn rejects(json: serde_json::Value) -> bool {
+        serde_json::from_value::<QrCode>(json).is_err()
+    }
+
+    #[test]
+    fn qr_code_round_trips() {
+        // 7+ adds version information; 40 is the largest; Auto masks pick their own pattern.
+        for (text, version) in [("HELLO", 1), ("a1234567", 7), ("é1234567", 12), (&*"x".repeat(1000), 40)] {
+            for mask in [MaskSetting::Auto, MaskSetting::Exact(0), MaskSetting::Exact(7)] {
+                round_trip(code(text, QrVersionSetting::Exact(version), mask));
+            }
+        }
+    }
+
+    #[test]
+    fn modules_serialize_as_one_hex_number() {
+        let json = hello_json();
+        let hex = json["modules"].as_str().unwrap();
+        // 21 x 21 = 441 bits, padded to 56 bytes.
+        assert_eq!(hex.len(), 112);
+        // The top row opens with the finder pattern's 7 dark modules, then the light separator.
+        assert!(hex.starts_with("fe"), "{hex}");
+    }
+
+    #[test]
+    fn qr_code_rejects_a_damaged_function_pattern() {
+        let mut json = hello_json();
+        let hex = json["modules"].as_str().unwrap();
+        json["modules"] = format!("7{}", &hex[1..]).into();  // Top-left module light.
+        assert!(rejects(json));
+    }
+
+    #[test]
+    fn qr_code_rejects_the_wrong_mask_for_its_format_information() {
+        let mut json = hello_json();
+        json["mask"] = 3.into();
+        assert!(rejects(json));
+    }
+
+    #[test]
+    fn qr_code_rejects_modules_of_the_wrong_length() {
+        let mut json = hello_json();
+        json["version"] = 2.into();
+        assert!(rejects(json));
+
+        let mut json = hello_json();
+        let hex = json["modules"].as_str().unwrap().to_string();
+        json["modules"] = hex[..hex.len() - 2].into();
+        assert!(rejects(json));
+    }
+
+    #[test]
+    fn qr_code_rejects_set_padding_bits() {
+        let mut json = hello_json();
+        let hex = json["modules"].as_str().unwrap().to_string();
+        let (body, last) = hex.split_at(hex.len() - 2);
+        // Bit 440 is the last byte's top bit; the other 7 are padding.
+        json["modules"] = format!("{body}{:02x}", u8::from_str_radix(last, 16).unwrap() | 1).into();
+        assert!(rejects(json));
+    }
+
+    #[test]
+    fn qr_code_rejects_bad_hex_and_bad_versions() {
+        let mut json = hello_json();
+        let hex = json["modules"].as_str().unwrap().to_string();
+        json["modules"] = format!("zz{}", &hex[2..]).into();
+        assert!(rejects(json));
+
+        let mut json = hello_json();
+        json["modules"] = format!("é{}", &hex[2..]).into();  // Multibyte, so no char boundary at 2.
+        assert!(rejects(json));
+
+        for version in [0, 41] {
+            let mut json = hello_json();
+            json["version"] = version.into();
+            assert!(rejects(json));
+        }
+    }
+
+    #[test]
+    fn qr_code_rejects_segments_that_do_not_tile() {
+        let mut json = hello_json();
+        json["segments"][0]["start_bit"] = 1.into();
+        assert!(rejects(json));
+
+        let mut json = hello_json();
+        json["segments"][0]["header_bits"] = 1000.into();
+        assert!(rejects(json));
     }
 }

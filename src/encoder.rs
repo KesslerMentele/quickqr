@@ -3,7 +3,7 @@ use crate::bits::write_bits;
 use crate::capacity;
 pub(crate) use crate::errors::{CreateQrError, EncodeDataError};
 use crate::gf_math::{error_correction_codewords, EcLength};
-use crate::qr_code::{EncodedData, EncodingMode, ErrorCorrectionLevel, QrVersion, SegmentStats};
+use crate::qr_code::{EncodedData, EncodingMode, ErrorCorrectionLevel, QrVersionSetting, SegmentStats};
 use crate::segmenter::{choose_version, SegmentMode, SegmentPlan, VersionGroup};
 
 #[cfg(feature = "kanji")]
@@ -219,7 +219,7 @@ pub(crate) fn encode_data_by_encoding_plan(data:&str, plan: SegmentPlan) -> Resu
 pub(crate) fn encode_single_segment(
     data: &str,
     mode: SegmentMode,
-    choice: QrVersion,
+    choice: QrVersionSetting,
     error_correction_level: ErrorCorrectionLevel,
 ) -> Result<EncodedData, CreateQrError> {
     let mut data_bits = encode_data_with_mode(data, EncodingMode::try_from(mode)?)?;
@@ -249,7 +249,7 @@ pub(crate) fn apply_formatting(
     let data_codewords = capacity::data_codewords(version, error_correction_level);
     let capacity_bits = data_codewords * 8;
     if bits.len() > capacity_bits {
-        return Err(EncodeDataError::BitsWouldOverflow(bits.len() as u32, capacity_bits));
+        return Err(EncodeDataError::BitsWouldOverflow{ bit_length: bits.len() as u32, bits_left: capacity_bits });
     }
 
     let terminator_length = (capacity_bits - bits.len()).min(4);
@@ -282,7 +282,7 @@ pub(crate) fn apply_error_correction(
     let codeword_count = data_codewords.len();
     let codeword_capacity = capacity::data_codewords(version, error_correction_level);
     if codeword_count != codeword_capacity  {
-        return Err(EncodeDataError::InvalidByteCount(codeword_count, codeword_capacity));
+        return Err(EncodeDataError::InvalidByteCount {actual_count: codeword_count, expected_count: codeword_capacity});
     }
 
     let block_count = capacity::error_correction_blocks(version, error_correction_level);
@@ -595,7 +595,7 @@ mod tests {
     fn error_correction_rejects_unformatted_data() {
         assert_eq!(
             apply_error_correction(&[0x10, 0x20], 1, ErrorCorrectionLevel::M).unwrap_err(),
-            EncodeDataError::InvalidByteCount(2, 16)
+            EncodeDataError::InvalidByteCount { actual_count: 2, expected_count: 16 }
         );
     }
 }

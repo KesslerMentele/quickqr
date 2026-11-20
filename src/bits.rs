@@ -14,7 +14,7 @@ pub(crate) fn write_bits(bits: &mut BitVec<u8, Lsb0>, value: u32, bit_length: us
         return Err(EncodeDataError::InvalidBitLength(bit_length))
     }
     if bit_length < 32 && value >= (1u32 << bit_length) {
-        return Err(EncodeDataError::BitsWouldOverflow(value, bit_length));
+        return Err(EncodeDataError::BitsWouldOverflow { bit_length: value , bits_left: bit_length});
     }
     bits.extend((0..bit_length).rev().map(|i| (value >> i) & 1 == 1));
     Ok(())

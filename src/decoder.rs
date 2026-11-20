@@ -263,11 +263,11 @@ mod tests {
     use crate::bits::write_bits;
     use crate::capacity::data_codewords;
     use super::*;
-    use crate::qr_code::{QrCode, EncodingMode, MaskSetting, QrConfiguration, QrVersion};
+    use crate::qr_code::{QrCode, EncodingMode, MaskSetting, QrConfiguration, QrVersionSetting};
 
     /// What a reader would hand over for `data` at 1-M under `mask`: bits and nothing else.
     fn scanned(data: &str, mask: u8) -> BitVec<u8, Lsb0> {
-        let matrix = QrCode::with_config(&QrConfiguration { text: data.parse().unwrap(), error_correction_level: ErrorCorrectionLevel::M, encoding_mode: EncodingMode::Auto, version: QrVersion::Auto, mask: MaskSetting::Exact(mask)}).unwrap().matrix;
+        let matrix = QrCode::with_config(&QrConfiguration { text: data.parse().unwrap(), error_correction_level: ErrorCorrectionLevel::M, encoding_mode: EncodingMode::Auto, version: QrVersionSetting::Auto, mask: MaskSetting::Exact(mask)}).unwrap().matrix;
         matrix.modules().to_bitvec()
     }
 
@@ -288,7 +288,7 @@ mod tests {
     fn decode_modules_reads_every_level_from_the_format_information() {
         use ErrorCorrectionLevel::*;
         for level in [L, M, Q, H] {
-            let matrix = QrCode::with_config(&QrConfiguration { text: "HELLO".into(), error_correction_level:level, mask: MaskSetting::Auto, version: QrVersion::Auto, encoding_mode: EncodingMode::Auto }).unwrap().matrix;
+            let matrix = QrCode::with_config(&QrConfiguration { text: "HELLO".into(), error_correction_level:level, mask: MaskSetting::Auto, version: QrVersionSetting::Auto, encoding_mode: EncodingMode::Auto }).unwrap().matrix;
             let (read_level, _) = read_format_information(matrix.modules(), matrix.size()).unwrap();
             assert_eq!(read_level, level);
             assert_eq!(decode_modules(matrix.modules()), Ok("HELLO".to_string()));
@@ -305,7 +305,7 @@ mod tests {
                     .map(|i| char::from(b'!' + (i % 90) as u8))
                     .collect();
                 let mask = MaskSetting::Exact(version % 8);
-                let matrix = QrCode::with_config(&QrConfiguration { text: original.clone(), error_correction_level:level, encoding_mode: EncodingMode::Byte, version: QrVersion::Exact(version), mask}).unwrap().matrix;
+                let matrix = QrCode::with_config(&QrConfiguration { text: original.clone(), error_correction_level:level, encoding_mode: EncodingMode::Byte, version: QrVersionSetting::Exact(version), mask}).unwrap().matrix;
                 assert_eq!(decode_modules(matrix.modules()).as_ref(), Ok(&original), "version {version} at {level:?}");
             }
         }
