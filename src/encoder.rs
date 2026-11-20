@@ -353,6 +353,7 @@ pub(crate) fn encode_data_with_mode(data:&str, mode:EncodingMode) -> Result<BitV
 
 #[cfg(test)]
 mod tests {
+    use crate::EncodeDataError::BitsWouldOverflow;
     use crate::segmenter::Segment;
     use super::*;
 
@@ -538,9 +539,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Result::unwrap()` on an `Err` value: BitsWouldOverflow(73, 72)")]
     fn formatting_rejects_data_over_capacity() {
-        apply_formatting(bitvec![u8, Lsb0; 0; 73], 1, ErrorCorrectionLevel::H).unwrap();
+        assert_eq!(apply_formatting(bitvec![u8, Lsb0; 0; 73], 1, ErrorCorrectionLevel::H).expect_err("Should Error"), BitsWouldOverflow { bit_length: 73, bits_left: 72 });
     }
 
     #[test]

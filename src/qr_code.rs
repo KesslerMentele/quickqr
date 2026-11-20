@@ -663,7 +663,7 @@ pub(crate) fn create_qr_code_bits(
         }
         #[cfg(not(feature = "kanji"))]
         EncodingMode::Kanji => {
-            return Err(CreateQrError::FeatureNotEnabled("kanji"))
+            return Err(CreateQrError::FeatureNotEnabled(EncodingMode::Kanji))
         },
         mode @ (EncodingMode::Eci | EncodingMode::Fnc1 | EncodingMode::StructuredAppend) => {
             return Err(CreateQrError::NotImplemented(mode));
